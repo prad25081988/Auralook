@@ -2,38 +2,41 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Live Chat — Lobby</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body>
-  <header class="topbar">
-    <span>Signed in as <strong>{{ user.name }}</strong></span>
-    <a href="{{ url_for('logout') }}">Logout</a>
-  </header>
+  <div class="app-shell">
+    <header class="topbar">
+      <span>Signed in as <strong>{{ user.name }}</strong></span>
+      <a href="{{ url_for('logout') }}">Logout</a>
+    </header>
 
-  <div class="layout">
-    <aside class="sidebar">
-      <h2>Online now</h2>
-      <ul id="online-list"></ul>
-    </aside>
+    <div class="layout">
+      <aside class="sidebar">
+        <h2>Online now</h2>
+        <ul id="online-list"></ul>
+      </aside>
 
-    <main class="chat-area">
-      <div id="no-chat" class="placeholder">
-        Pick someone online to start a live chat. Nothing is saved — ever.
-      </div>
-
-      <div id="chat-window" class="hidden">
-        <div class="chat-header">
-          Chatting with <span id="partner-name"></span>
-          <button id="leave-btn">Leave</button>
+      <main class="chat-area">
+        <div id="no-chat" class="placeholder">
+          Pick someone online to start a live chat. Nothing is saved — ever.
         </div>
-        <div id="messages" class="messages"></div>
-        <form id="message-form">
-          <input id="message-input" autocomplete="off" placeholder="Type a message..." />
-          <button type="submit">Send</button>
-        </form>
-      </div>
-    </main>
+
+        <div id="chat-window" class="hidden">
+          <div class="chat-header">
+            Chatting with <span id="partner-name"></span>
+            <button id="leave-btn">Leave</button>
+          </div>
+          <div id="messages" class="messages"></div>
+          <form id="message-form">
+            <input id="message-input" autocomplete="off" placeholder="Type a message..." />
+            <button type="submit">Send</button>
+          </form>
+        </div>
+      </main>
+    </div>
   </div>
 
   <!-- Incoming request modal -->
