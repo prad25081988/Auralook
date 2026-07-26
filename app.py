@@ -161,14 +161,30 @@ def on_respond_chat(data):
     emit("chat_started", {"room": room_id, "with_name": online_users[requester_sid]["name"]}, room=target_sid)
 
 
+@socketio.on("exchange_key")
+def on_exchange_key(data):
+    room_id = active_rooms.get(request.sid)
+    if not room_id:
+        return
+    # Just relay the public key blindly — server never sees the private key
+    # or the resulting shared secret, so it can never decrypt messages.
+    emit("exchange_key", {"publicKey": data.get("publicKey")}, room=room_id, include_self=False)
+
+
 @socketio.on("send_message")
 def on_send_message(data):
     room_id = active_rooms.get(request.sid)
     if not room_id:
         return
     sender_name = online_users.get(request.sid, {}).get("name", "Unknown")
-    # Message is relayed live and NEVER stored anywhere.
-    emit("receive_message", {"text": data.get("text", ""), "from": sender_name}, room=room_id, include_self=False)
+    # The server only ever sees the encrypted blob (iv + ciphertext).
+    # It has no key to decrypt it and never stores it anywhere.
+    emit(
+        "receive_message",
+        {"iv": data.get("iv"), "data": data.get("data"), "from": sender_name},
+        room=room_id,
+        include_self=False,
+    )
 
 
 @socketio.on("leave_chat")
