@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live Chat — Lobby</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <span>Signed in as <strong>{{ user.name }}</strong></span>
+    <a href="{{ url_for('logout') }}">Logout</a>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>Online now</h2>
+      <ul id="online-list"></ul>
+    </aside>
+
+    <main class="chat-area">
+      <div id="no-chat" class="placeholder">
+        Pick someone online to start a live chat. Nothing is saved — ever.
+      </div>
+
+      <div id="chat-window" class="hidden">
+        <div class="chat-header">
+          Chatting with <span id="partner-name"></span>
+          <button id="leave-btn">Leave</button>
+        </div>
+        <div id="messages" class="messages"></div>
+        <form id="message-form">
+          <input id="message-input" autocomplete="off" placeholder="Type a message..." />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <!-- Incoming request modal -->
+  <div id="request-modal" class="modal hidden">
+    <div class="modal-box">
+      <p id="request-text"></p>
+      <button id="accept-btn">Accept</button>
+      <button id="decline-btn">Decline</button>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+  <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+</body>
+</html>

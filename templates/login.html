@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Live Chat — Sign In</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="center-page">
+  <div class="card">
+    <h1>Live Chat</h1>
+    <p class="subtitle">No history. No saved messages. Chat only while both people are online.</p>
+    <a class="google-btn" href="{{ url_for('login') }}">
+      Sign in with Google
+    </a>
+  </div>
+</body>
+</html>
