@@ -35,6 +35,26 @@ body {
   font-weight: 600;
 }
 
+.error-text { color: #ea4335; font-size: 13px; margin-bottom: 12px; }
+.stacked-form { display: flex; flex-direction: column; gap: 12px; }
+.stacked-form input {
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  font-size: 15px;
+  text-align: center;
+}
+.primary-btn {
+  padding: 10px 20px;
+  background: #4285F4;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+
 /* ---------- App shell: centered, capped width ---------- */
 .app-shell {
   max-width: 900px;

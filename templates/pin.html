@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Chat — Enter PIN</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="center-page">
+  <div class="card">
+    <h1>Enter PIN</h1>
+    <p class="subtitle">This app is invite-only. Enter the access PIN to continue.</p>
+    {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
+    <form method="POST" class="stacked-form">
+      <input type="password" name="pin" placeholder="PIN" autofocus required />
+      <button type="submit" class="primary-btn">Continue</button>
+    </form>
+  </div>
+</body>
+</html>

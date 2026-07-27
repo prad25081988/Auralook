@@ -1,6 +1,8 @@
 """
 Live-only chat app.
 - Login with Google account
+- Enter a shared PIN to prove you're allowed in
+- Pick a display name to show instead of your Google name
 - See who else is online right now
 - Request to chat 1-on-1
 - Messages travel ONLY through the live socket connection
@@ -22,6 +24,12 @@ socketio = SocketIO(
     async_mode="threading",
     max_http_buffer_size=22 * 1024 * 1024,  # headroom for 15MB images after base64 + JSON overhead
 )
+
+# ---------------------------------------------------------------------------
+# Shared access PIN — anyone who logs in with Google still needs this to
+# get past the gate. Change it here, or override with an env var.
+# ---------------------------------------------------------------------------
+ACCESS_PIN = os.environ.get("ACCESS_PIN", "bp")
 
 # ---------------------------------------------------------------------------
 # Google OAuth setup
@@ -57,7 +65,11 @@ def index():
     user = session.get("user")
     if not user:
         return render_template("login.html")
-    return render_template("lobby.html", user=user)
+    if not session.get("pin_verified"):
+        return redirect(url_for("enter_pin"))
+    if not session.get("display_name"):
+        return redirect(url_for("set_name"))
+    return render_template("lobby.html", display_name=session["display_name"])
 
 
 @app.route("/login")
@@ -79,9 +91,44 @@ def auth_callback():
     return redirect(url_for("index"))
 
 
+@app.route("/pin", methods=["GET", "POST"])
+def enter_pin():
+    if not session.get("user"):
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        entered = request.form.get("pin", "")
+        if entered == ACCESS_PIN:
+            session["pin_verified"] = True
+            return redirect(url_for("index"))
+        error = "Incorrect PIN. Try again."
+
+    return render_template("pin.html", error=error)
+
+
+@app.route("/set-name", methods=["GET", "POST"])
+def set_name():
+    if not session.get("user") or not session.get("pin_verified"):
+        return redirect(url_for("index"))
+
+    error = None
+    if request.method == "POST":
+        name = request.form.get("display_name", "").strip()
+        if not name:
+            error = "Please enter a display name."
+        elif len(name) > 30:
+            error = "Please keep it under 30 characters."
+        else:
+            session["display_name"] = name
+            return redirect(url_for("index"))
+
+    return render_template("set_name.html", error=error)
+
+
 @app.route("/logout")
 def logout():
-    session.pop("user", None)
+    session.clear()
     return redirect(url_for("index"))
 
 
@@ -91,11 +138,12 @@ def logout():
 @socketio.on("connect")
 def on_connect():
     user = session.get("user")
-    if not user:
-        return False  # reject unauthenticated sockets
+    display_name = session.get("display_name")
+    if not user or not session.get("pin_verified") or not display_name:
+        return False  # reject unauthenticated / incomplete-setup sockets
 
     online_users[request.sid] = {
-        "name": user["name"],
+        "name": display_name,
         "email": user["email"],
         "user_id": user["id"],
     }

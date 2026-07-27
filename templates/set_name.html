@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Live Chat — Choose a Name</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="center-page">
+  <div class="card">
+    <h1>Choose a display name</h1>
+    <p class="subtitle">This is the name others will see instead of your Google account name.</p>
+    {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
+    <form method="POST" class="stacked-form">
+      <input type="text" name="display_name" placeholder="e.g. Alex" maxlength="30" autofocus required />
+      <button type="submit" class="primary-btn">Continue</button>
+    </form>
+  </div>
+</body>
+</html>
