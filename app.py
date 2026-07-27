@@ -12,7 +12,7 @@ Live-only chat app.
 
 import os
 import uuid
-from flask import Flask, redirect, url_for, session, render_template, request
+from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from authlib.integrations.flask_client import OAuth
 
@@ -30,6 +30,14 @@ socketio = SocketIO(
 # get past the gate. Change it here, or override with an env var.
 # ---------------------------------------------------------------------------
 ACCESS_PIN = os.environ.get("ACCESS_PIN", "bp")
+
+# ---------------------------------------------------------------------------
+# TEMPORARY bypass switch for Google login. Set SKIP_GOOGLE_LOGIN=true as an
+# env var to enable the "Continue without Google" button on the login page.
+# Leave unset (or false) to keep Google login as the only way in — this flag
+# defaults to OFF so nothing changes unless you explicitly turn it on.
+# ---------------------------------------------------------------------------
+SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "false").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Google OAuth setup
@@ -60,16 +68,39 @@ active_rooms = {}      # sid -> room_id (so we know who is currently chatting)
 # ---------------------------------------------------------------------------
 # Auth routes
 # ---------------------------------------------------------------------------
+@app.route("/sw.js")
+def service_worker():
+    response = send_from_directory(app.static_folder, "sw.js")
+    response.headers["Content-Type"] = "application/javascript"
+    return response
+
+
 @app.route("/")
 def index():
     user = session.get("user")
     if not user:
-        return render_template("login.html")
+        return render_template("login.html", skip_login_enabled=SKIP_GOOGLE_LOGIN)
     if not session.get("pin_verified"):
         return redirect(url_for("enter_pin"))
     if not session.get("display_name"):
         return redirect(url_for("set_name"))
     return render_template("lobby.html", display_name=session["display_name"])
+
+
+@app.route("/skip-login")
+def skip_login():
+    # Temporary bypass — does NOT touch the Google OAuth code at all.
+    # Only works while SKIP_GOOGLE_LOGIN is true. Flip that flag off
+    # (or remove this route) to fully restore Google-only login.
+    if not SKIP_GOOGLE_LOGIN:
+        return redirect(url_for("index"))
+    session["user"] = {
+        "id": "temp-user",
+        "name": "Guest",
+        "email": "guest@example.com",
+        "picture": None,
+    }
+    return redirect(url_for("index"))
 
 
 @app.route("/login")

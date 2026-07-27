@@ -3,16 +3,33 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Live Chat — Sign In</title>
+  <title>Auralook — Sign In</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}" />
+  <meta name="theme-color" content="#4285F4" />
+  <link rel="icon" href="{{ url_for('static', filename='icon-192.png') }}" />
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Auralook" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body class="center-page">
   <div class="card">
-    <h1>Live Chat</h1>
+    <h1>Auralook</h1>
     <p class="subtitle">No history. No saved messages. Chat only while both people are online.</p>
     <a class="google-btn" href="{{ url_for('login') }}">
       Sign in with Google
     </a>
+    {% if skip_login_enabled %}
+    <p class="skip-note">— or —</p>
+    <a class="skip-btn" href="{{ url_for('skip_login') }}">
+      Continue without Google (temporary)
+    </a>
+    {% endif %}
   </div>
+  <script>
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js");
+    }
+  </script>
 </body>
 </html>
