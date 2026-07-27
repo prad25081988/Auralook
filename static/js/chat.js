@@ -25,6 +25,19 @@ const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB cap, server buffer sized with 
 let myKeyPair = null;
 let sharedKey = null;
 
+// Converting large byte arrays to base64 using String.fromCharCode(...bytes)
+// crashes once bytes.length gets much above ~65,000 (call-stack limit) —
+// which any real photo blows past instantly. This chunked version has no
+// such limit, so images of any reasonable size encode safely.
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000; // 32KB per chunk
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function generateKeyPair() {
   myKeyPair = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
@@ -35,7 +48,7 @@ async function generateKeyPair() {
 
 async function exportPublicKey() {
   const raw = await crypto.subtle.exportKey("raw", myKeyPair.publicKey);
-  return btoa(String.fromCharCode(...new Uint8Array(raw)));
+  return bytesToBase64(new Uint8Array(raw));
 }
 
 async function deriveSharedKey(partnerPublicKeyBase64) {
@@ -61,8 +74,8 @@ async function encryptBytes(bytes) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, sharedKey, bytes);
   return {
-    iv: btoa(String.fromCharCode(...iv)),
-    data: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
+    iv: bytesToBase64(iv),
+    data: bytesToBase64(new Uint8Array(ciphertext)),
   };
 }
 
@@ -192,16 +205,21 @@ imageInput.onchange = async () => {
     return;
   }
   if (file.size > MAX_IMAGE_BYTES) {
-    alert("Image is too large. Please pick something under 4MB.");
+    alert("Image is too large. Please pick something under 15MB.");
     return;
   }
 
-  const arrayBuffer = await file.arrayBuffer();
-  const encrypted = await encryptBytes(arrayBuffer);
-  socket.emit("send_message", { ...encrypted, msgType: "image", mimeType: file.type });
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const encrypted = await encryptBytes(arrayBuffer);
+    socket.emit("send_message", { ...encrypted, msgType: "image", mimeType: file.type });
 
-  const localUrl = URL.createObjectURL(file);
-  appendImageMessage(localUrl, "You", "mine");
+    const localUrl = URL.createObjectURL(file);
+    appendImageMessage(localUrl, "You", "mine");
+  } catch (err) {
+    console.error("Image send failed:", err);
+    alert("Something went wrong sending that image. Please try again with a smaller file.");
+  }
 };
 
 leaveBtn.onclick = () => {
