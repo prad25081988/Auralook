@@ -37,7 +37,7 @@ ACCESS_PIN = os.environ.get("ACCESS_PIN", "bp")
 # Leave unset (or false) to keep Google login as the only way in — this flag
 # defaults to OFF so nothing changes unless you explicitly turn it on.
 # ---------------------------------------------------------------------------
-SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "false").lower() == "true"
+SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true"
 
 # ---------------------------------------------------------------------------
 # Google OAuth setup

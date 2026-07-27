@@ -15,16 +15,13 @@
 <body class="center-page">
   <div class="card">
     <h1>Auralook</h1>
-    <p class="subtitle">No history. No saved messages. Chat only while both people are online.</p>
     <a class="google-btn" href="{{ url_for('login') }}">
       Sign in with Google
     </a>
-    {% if skip_login_enabled %}
     <p class="skip-note">— or —</p>
     <a class="skip-btn" href="{{ url_for('skip_login') }}">
-      Continue without Google (temporary)
+      Skip Sign In
     </a>
-    {% endif %}
   </div>
   <script>
     if ("serviceWorker" in navigator) {
