@@ -182,7 +182,7 @@ messageForm.onsubmit = async (e) => {
   if (!text || !myCurrentRoom || !sharedKey) return;
   const encrypted = await encryptMessage(text);
   socket.emit("send_message", { ...encrypted, msgType: "text" });
-  appendTextMessage(`You: ${text}`, "mine");
+  appendTextMessage(`You: ${text}`, "mine", true); // true = show sent checkmark
   messageInput.value = "";
 };
 
@@ -209,15 +209,19 @@ imageInput.onchange = async () => {
     return;
   }
 
+  // Show an immediate "Sending..." placeholder so large photos don't look frozen
+  const placeholder = appendSendingPlaceholder();
+
   try {
     const arrayBuffer = await file.arrayBuffer();
     const encrypted = await encryptBytes(arrayBuffer);
     socket.emit("send_message", { ...encrypted, msgType: "image", mimeType: file.type });
 
     const localUrl = URL.createObjectURL(file);
-    appendImageMessage(localUrl, "You", "mine");
+    replaceWithImageMessage(placeholder, localUrl, "You", "mine");
   } catch (err) {
     console.error("Image send failed:", err);
+    placeholder.remove();
     alert("Something went wrong sending that image. Please try again with a smaller file.");
   }
 };
@@ -230,12 +234,19 @@ leaveBtn.onclick = () => {
   sharedKey = null;
 };
 
-function appendTextMessage(text, cls) {
+function appendTextMessage(text, cls, showSent) {
   const div = document.createElement("div");
   div.className = `message ${cls}`;
   div.textContent = text;
+  if (showSent) {
+    const tick = document.createElement("span");
+    tick.className = "sent-tick";
+    tick.textContent = " ✓";
+    div.appendChild(tick);
+  }
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
 }
 
 function appendSystemMessage(text) {
@@ -257,5 +268,39 @@ function appendImageMessage(url, fromLabel, cls) {
   wrapper.appendChild(img);
 
   messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return wrapper;
+}
+
+// Placeholder shown while a photo is being encrypted/sent
+function appendSendingPlaceholder() {
+  const wrapper = document.createElement("div");
+  wrapper.className = "message mine image-message sending-placeholder";
+  wrapper.textContent = "Sending photo...";
+  messagesEl.appendChild(wrapper);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return wrapper;
+}
+
+// Swap the placeholder out for the real image + a "Sent" checkmark once done
+function replaceWithImageMessage(placeholder, url, fromLabel, cls) {
+  placeholder.innerHTML = "";
+  placeholder.className = `message ${cls} image-message`;
+
+  const label = document.createElement("div");
+  label.className = "image-label";
+  label.textContent = fromLabel;
+  placeholder.appendChild(label);
+
+  const img = document.createElement("img");
+  img.src = url;
+  img.className = "chat-image";
+  placeholder.appendChild(img);
+
+  const tick = document.createElement("div");
+  tick.className = "sent-tick image-sent-tick";
+  tick.textContent = "Sent ✓";
+  placeholder.appendChild(tick);
+
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }

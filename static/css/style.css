@@ -36,6 +36,16 @@ body {
 }
 
 .error-text { color: #ea4335; font-size: 13px; margin-bottom: 12px; }
+.skip-note { color: #999; font-size: 12px; margin: 12px 0 8px; }
+.skip-btn {
+  display: inline-block;
+  padding: 8px 16px;
+  background: #f0f0f0;
+  color: #555;
+  text-decoration: none;
+  border-radius: 6px;
+  font-size: 13px;
+}
 .stacked-form { display: flex; flex-direction: column; gap: 12px; }
 .stacked-form input {
   padding: 12px;
@@ -118,6 +128,15 @@ body {
 .image-message { display: flex; flex-direction: column; gap: 4px; padding: 6px; max-width: 60%; }
 .image-label { font-size: 11px; opacity: 0.7; padding: 0 4px; }
 .chat-image { max-width: 100%; max-height: 260px; border-radius: 8px; display: block; object-fit: contain; }
+
+.sent-tick { font-size: 11px; opacity: 0.75; }
+.image-sent-tick { font-size: 11px; opacity: 0.75; padding: 0 4px; text-align: right; }
+.sending-placeholder {
+  background: #d9e6fb;
+  color: #4285F4;
+  font-style: italic;
+  font-size: 13px;
+}
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; padding: 20px; }
 .modal-box { background: white; padding: 24px; border-radius: 10px; text-align: center; max-width: 320px; width: 100%; }
