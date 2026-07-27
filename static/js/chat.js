@@ -8,6 +8,8 @@ const messagesEl = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const leaveBtn = document.getElementById("leave-btn");
+const imageInput = document.getElementById("image-input");
+const imageBtn = document.getElementById("image-btn");
 
 const modalEl = document.getElementById("request-modal");
 const requestTextEl = document.getElementById("request-text");
@@ -17,11 +19,12 @@ const declineBtn = document.getElementById("decline-btn");
 let myCurrentRoom = null;
 let pendingRequesterSid = null;
 
-// --- End-to-end encryption state (per chat session) ---
-let myKeyPair = null;       // { publicKey, privateKey } - generated fresh each chat
-let sharedKey = null;       // derived AES-GCM key, known only to the two browsers
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB cap, comfortably under server's 6MB buffer
 
-// Generate a fresh ECDH key pair for this chat session
+// --- End-to-end encryption state (per chat session) ---
+let myKeyPair = null;
+let sharedKey = null;
+
 async function generateKeyPair() {
   myKeyPair = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
@@ -30,13 +33,11 @@ async function generateKeyPair() {
   );
 }
 
-// Export our public key so we can send it to the other side (safe to expose)
 async function exportPublicKey() {
   const raw = await crypto.subtle.exportKey("raw", myKeyPair.publicKey);
   return btoa(String.fromCharCode(...new Uint8Array(raw)));
 }
 
-// Import the partner's public key and derive our shared AES-GCM key
 async function deriveSharedKey(partnerPublicKeyBase64) {
   const raw = Uint8Array.from(atob(partnerPublicKeyBase64), (c) => c.charCodeAt(0));
   const partnerPublicKey = await crypto.subtle.importKey(
@@ -55,21 +56,30 @@ async function deriveSharedKey(partnerPublicKeyBase64) {
   );
 }
 
-async function encryptMessage(plainText) {
+// Generic encrypt/decrypt over raw bytes — used for both text and images
+async function encryptBytes(bytes) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(plainText);
-  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, sharedKey, encoded);
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, sharedKey, bytes);
   return {
     iv: btoa(String.fromCharCode(...iv)),
     data: btoa(String.fromCharCode(...new Uint8Array(ciphertext))),
   };
 }
 
-async function decryptMessage(payload) {
+async function decryptBytes(payload) {
   const iv = Uint8Array.from(atob(payload.iv), (c) => c.charCodeAt(0));
   const data = Uint8Array.from(atob(payload.data), (c) => c.charCodeAt(0));
   const plainBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, sharedKey, data);
-  return new TextDecoder().decode(plainBuffer);
+  return plainBuffer;
+}
+
+async function encryptMessage(plainText) {
+  return encryptBytes(new TextEncoder().encode(plainText));
+}
+
+async function decryptMessage(payload) {
+  const buffer = await decryptBytes(payload);
+  return new TextDecoder().decode(buffer);
 }
 
 // --- Presence list ---
@@ -119,7 +129,7 @@ socket.on("chat_started", async ({ room, with_name }) => {
   messagesEl.innerHTML = "";
   noChatEl.classList.add("hidden");
   chatWindowEl.classList.remove("hidden");
-  appendMessage("Setting up secure encryption for this chat...", "system");
+  appendSystemMessage("Setting up secure encryption for this chat...");
 
   await generateKeyPair();
   const myPublicKey = await exportPublicKey();
@@ -128,21 +138,27 @@ socket.on("chat_started", async ({ room, with_name }) => {
 
 socket.on("exchange_key", async ({ publicKey }) => {
   await deriveSharedKey(publicKey);
-  appendMessage("🔒 Chat is now end-to-end encrypted.", "system");
+  appendSystemMessage("🔒 Chat is now end-to-end encrypted.");
 });
 
 socket.on("receive_message", async (payload) => {
   if (!sharedKey) return;
   try {
-    const text = await decryptMessage(payload);
-    appendMessage(`${payload.from}: ${text}`, "theirs");
+    if (payload.msgType === "image") {
+      const buffer = await decryptBytes(payload);
+      const blob = new Blob([buffer], { type: payload.mimeType || "image/jpeg" });
+      appendImageMessage(URL.createObjectURL(blob), payload.from, "theirs");
+    } else {
+      const text = await decryptMessage(payload);
+      appendTextMessage(`${payload.from}: ${text}`, "theirs");
+    }
   } catch (e) {
-    appendMessage("[Could not decrypt a message]", "system");
+    appendSystemMessage("[Could not decrypt an incoming message]");
   }
 });
 
 socket.on("partner_left", () => {
-  appendMessage("The other person left the chat.", "system");
+  appendSystemMessage("The other person left the chat.");
   myCurrentRoom = null;
   sharedKey = null;
 });
@@ -152,9 +168,40 @@ messageForm.onsubmit = async (e) => {
   const text = messageInput.value.trim();
   if (!text || !myCurrentRoom || !sharedKey) return;
   const encrypted = await encryptMessage(text);
-  socket.emit("send_message", encrypted);
-  appendMessage(`You: ${text}`, "mine");
+  socket.emit("send_message", { ...encrypted, msgType: "text" });
+  appendTextMessage(`You: ${text}`, "mine");
   messageInput.value = "";
+};
+
+// --- Image sending ---
+imageBtn.onclick = () => {
+  if (!myCurrentRoom || !sharedKey) {
+    alert("You need an active encrypted chat before sending an image.");
+    return;
+  }
+  imageInput.click();
+};
+
+imageInput.onchange = async () => {
+  const file = imageInput.files[0];
+  imageInput.value = ""; // reset so selecting the same file again still fires onchange
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    alert("Please select an image file.");
+    return;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    alert("Image is too large. Please pick something under 4MB.");
+    return;
+  }
+
+  const arrayBuffer = await file.arrayBuffer();
+  const encrypted = await encryptBytes(arrayBuffer);
+  socket.emit("send_message", { ...encrypted, msgType: "image", mimeType: file.type });
+
+  const localUrl = URL.createObjectURL(file);
+  appendImageMessage(localUrl, "You", "mine");
 };
 
 leaveBtn.onclick = () => {
@@ -165,10 +212,32 @@ leaveBtn.onclick = () => {
   sharedKey = null;
 };
 
-function appendMessage(text, cls) {
+function appendTextMessage(text, cls) {
   const div = document.createElement("div");
   div.className = `message ${cls}`;
   div.textContent = text;
   messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function appendSystemMessage(text) {
+  appendTextMessage(text, "system");
+}
+
+function appendImageMessage(url, fromLabel, cls) {
+  const wrapper = document.createElement("div");
+  wrapper.className = `message ${cls} image-message`;
+
+  const label = document.createElement("div");
+  label.className = "image-label";
+  label.textContent = fromLabel;
+  wrapper.appendChild(label);
+
+  const img = document.createElement("img");
+  img.src = url;
+  img.className = "chat-image";
+  wrapper.appendChild(img);
+
+  messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }

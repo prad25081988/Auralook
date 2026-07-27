@@ -93,6 +93,11 @@ body {
 #message-form { display: flex; padding: 12px; background: white; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
 #message-input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; min-width: 0; }
 #message-form button { padding: 10px 16px; border: none; background: #4285F4; color: white; border-radius: 6px; cursor: pointer; }
+#image-btn { background: #f0f0f0; color: #333; padding: 10px 12px; font-size: 16px; }
+
+.image-message { display: flex; flex-direction: column; gap: 4px; padding: 6px; max-width: 60%; }
+.image-label { font-size: 11px; opacity: 0.7; padding: 0 4px; }
+.chat-image { max-width: 100%; max-height: 260px; border-radius: 8px; display: block; object-fit: contain; }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; padding: 20px; }
 .modal-box { background: white; padding: 24px; border-radius: 10px; text-align: center; max-width: 320px; width: 100%; }

@@ -16,7 +16,12 @@ from authlib.integrations.flask_client import OAuth
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode="threading",
+    max_http_buffer_size=6 * 1024 * 1024,  # allow images up to ~6MB through the socket
+)
 
 # ---------------------------------------------------------------------------
 # Google OAuth setup
@@ -178,10 +183,17 @@ def on_send_message(data):
         return
     sender_name = online_users.get(request.sid, {}).get("name", "Unknown")
     # The server only ever sees the encrypted blob (iv + ciphertext).
-    # It has no key to decrypt it and never stores it anywhere.
+    # It has no key to decrypt it and never stores it anywhere — same
+    # rule applies whether this is a text message or an image.
     emit(
         "receive_message",
-        {"iv": data.get("iv"), "data": data.get("data"), "from": sender_name},
+        {
+            "iv": data.get("iv"),
+            "data": data.get("data"),
+            "from": sender_name,
+            "msgType": data.get("msgType", "text"),
+            "mimeType": data.get("mimeType"),
+        },
         room=room_id,
         include_self=False,
     )
