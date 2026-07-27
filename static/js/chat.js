@@ -8,6 +8,9 @@ const messagesEl = document.getElementById("messages");
 const messageForm = document.getElementById("message-form");
 const messageInput = document.getElementById("message-input");
 const leaveBtn = document.getElementById("leave-btn");
+const clearChatBtn = document.getElementById("clear-chat-btn");
+const selectModeBtn = document.getElementById("select-mode-btn");
+const deleteSelectedBtn = document.getElementById("delete-selected-btn");
 const imageInput = document.getElementById("image-input");
 const imageBtn = document.getElementById("image-btn");
 
@@ -244,6 +247,7 @@ function appendTextMessage(text, cls, showSent) {
     tick.textContent = " ✓";
     div.appendChild(tick);
   }
+  if (cls !== "system") addDeleteButton(div);
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return div;
@@ -267,6 +271,7 @@ function appendImageMessage(url, fromLabel, cls) {
   img.className = "chat-image";
   wrapper.appendChild(img);
 
+  addDeleteButton(wrapper);
   messagesEl.appendChild(wrapper);
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return wrapper;
@@ -302,5 +307,53 @@ function replaceWithImageMessage(placeholder, url, fromLabel, cls) {
   tick.textContent = "Sent ✓";
   placeholder.appendChild(tick);
 
+  addDeleteButton(placeholder);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
+
+// Adds a small "×" that removes just this one message from your own view,
+// plus a checkbox (hidden unless "Select" mode is on) for bulk deletion.
+// This never touches the other person's screen or any server data — since
+// nothing is stored anywhere, "deleting" simply means removing it from the
+// DOM here.
+function addDeleteButton(el) {
+  el.classList.add("has-delete");
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.className = "msg-select-checkbox";
+  el.appendChild(checkbox);
+
+  const btn = document.createElement("button");
+  btn.className = "delete-msg-btn";
+  btn.setAttribute("aria-label", "Delete this message from your view");
+  btn.textContent = "×";
+  btn.onclick = () => el.remove();
+  el.appendChild(btn);
+}
+
+// "Clear chat" — wipes every message from your own view in one go.
+// Purely local: the other person's screen and the (nonexistent) server
+// history are completely unaffected.
+clearChatBtn.onclick = () => {
+  messagesEl.innerHTML = "";
+};
+
+// --- Multi-select mode for bulk-deleting specific messages ---
+let selectModeActive = false;
+
+selectModeBtn.onclick = () => {
+  selectModeActive = !selectModeActive;
+  messagesEl.classList.toggle("select-mode", selectModeActive);
+  selectModeBtn.textContent = selectModeActive ? "Cancel" : "Select";
+  deleteSelectedBtn.classList.toggle("hidden", !selectModeActive);
+  if (!selectModeActive) {
+    // Leaving select mode: uncheck everything so it starts fresh next time
+    messagesEl.querySelectorAll(".msg-select-checkbox").forEach((cb) => (cb.checked = false));
+  }
+};
+
+deleteSelectedBtn.onclick = () => {
+  const checked = messagesEl.querySelectorAll(".msg-select-checkbox:checked");
+  checked.forEach((cb) => cb.closest(".message").remove());
+};
