@@ -19,7 +19,7 @@ const declineBtn = document.getElementById("decline-btn");
 let myCurrentRoom = null;
 let pendingRequesterSid = null;
 
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4MB cap, comfortably under server's 6MB buffer
+const MAX_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB cap, server buffer sized with headroom above this
 
 // --- End-to-end encryption state (per chat session) ---
 let myKeyPair = null;

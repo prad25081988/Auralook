@@ -20,7 +20,7 @@ socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode="threading",
-    max_http_buffer_size=6 * 1024 * 1024,  # allow images up to ~6MB through the socket
+    max_http_buffer_size=22 * 1024 * 1024,  # headroom for 15MB images after base64 + JSON overhead
 )
 
 # ---------------------------------------------------------------------------
