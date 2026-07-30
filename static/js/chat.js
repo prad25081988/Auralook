@@ -187,7 +187,6 @@ contactCloseBtn.onclick = () => {
 
 contactClearBtn.onclick = async () => {
   if (!currentContactEmail) return;
-  if (!confirm("Clear this entire chat from your view? This won't affect the other person's copy.")) return;
   try {
     const res = await fetch(`/api/conversation/${encodeURIComponent(currentContactEmail)}/clear-for-me`, {
       method: "POST",
@@ -451,4 +450,17 @@ document.addEventListener("visibilitychange", () => {
       resetInactivityTimer();
     }
   }
+});
+
+// ===========================================================================
+// QUIT DETECTION — fully closing the app (swiping it away, force-closing)
+// should log out immediately, unlike just minimizing which follows the
+// normal 2-minute inactivity timer above. Browsers don't give a perfectly
+// guaranteed "the app was just killed" signal, but "pagehide" firing is the
+// closest reliable one: it fires when the page is actually being unloaded
+// or discarded, not on a simple minimize/background. Sending this as a
+// best-effort beacon covers the vast majority of real "quit the app" cases.
+// ===========================================================================
+window.addEventListener("pagehide", () => {
+  navigator.sendBeacon("/logout");
 });

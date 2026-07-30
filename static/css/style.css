@@ -70,6 +70,7 @@ body {
   max-width: 900px;
   margin: 0 auto;
   height: 100vh;
+  height: 100dvh; /* accounts for mobile browser toolbars shrinking the viewport */
   display: flex;
   flex-direction: column;
   background: #f5f6f8;
@@ -162,12 +163,15 @@ body {
 /* ---------- Mobile: stack sidebar above chat, full width ---------- */
 @media (max-width: 640px) {
   .app-shell { box-shadow: none; }
-  .layout { flex-direction: column; }
+  .layout { flex-direction: column; min-height: 0; }
   .sidebar {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid #e0e0e0;
-    max-height: 160px;
+    max-height: 120px;
+    flex-shrink: 0;
   }
+  .chat-area { min-height: 0; }
+  #contact-message-form, #ephemeral-message-form { flex-shrink: 0; }
   .message { max-width: 88%; }
 }

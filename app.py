@@ -154,7 +154,8 @@ def enter_pin():
             return render_template(
                 "login.html",
                 skip_login_enabled=SKIP_GOOGLE_LOGIN,
-                error="Too many incorrect PIN attempts. Please sign in again.",
+                error="Too many incorrect PIN attempts. This device has been locked.",
+                locked=True,
             )
         error = f"Incorrect PIN. Try again. ({session['pin_attempts']}/3 attempts)"
     return render_template("pin.html", error=error)
@@ -181,7 +182,7 @@ def set_name():
     return render_template("set_name.html", error=error)
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
     return redirect(url_for("index"))

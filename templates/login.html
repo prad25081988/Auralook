@@ -16,15 +16,40 @@
   <div class="card">
     <h1>Auralook</h1>
     {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
-    <a class="google-btn" href="{{ url_for('login') }}">
-      Sign in with Google
-    </a>
-    <p class="skip-note">— or —</p>
-    <a class="skip-btn" href="{{ url_for('skip_login') }}">
-      Skip Sign In
-    </a>
+
+    <div id="login-buttons">
+      <a class="google-btn" href="{{ url_for('login') }}">
+        Sign in with Google
+      </a>
+      {% if skip_login_enabled %}
+      <p class="skip-note">— or —</p>
+      <a class="skip-btn" href="{{ url_for('skip_login') }}">
+        Skip Sign In
+      </a>
+      {% endif %}
+    </div>
+
+    <div id="lockout-message" class="hidden">
+      <p class="subtitle">
+        This device has been locked after too many incorrect PIN attempts.
+        Please reinstall the app to try again.
+      </p>
+    </div>
   </div>
+
   <script>
+    (function () {
+      var justLocked = {{ 'true' if locked else 'false' }};
+      if (justLocked) {
+        localStorage.setItem('auralook_pin_locked', 'true');
+      }
+      var isLocked = localStorage.getItem('auralook_pin_locked') === 'true';
+      if (isLocked) {
+        document.getElementById('login-buttons').style.display = 'none';
+        document.getElementById('lockout-message').classList.remove('hidden');
+      }
+    })();
+
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js");
     }
