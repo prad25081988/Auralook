@@ -21,10 +21,7 @@
 
     <div class="layout">
       <aside class="sidebar">
-        <h2>Online now</h2>
-        <ul id="online-list"></ul>
-
-        <h2 class="contacts-heading">Contacts</h2>
+        <h2>Chats</h2>
         <form id="add-contact-form" class="add-contact-form">
           <input id="add-contact-input" type="email" placeholder="Add by email" required />
           <button type="submit">+</button>
@@ -35,30 +32,16 @@
 
       <main class="chat-area">
         <div id="no-chat" class="placeholder">
-          Pick someone online for a live encrypted chat, or a contact to message anytime.
-        </div>
-
-        <div id="chat-window" class="hidden">
-          <div class="chat-header">
-            Chatting with <span id="partner-name"></span>
-            <button id="select-mode-btn" title="Select multiple messages to delete">Select</button>
-            <button id="delete-selected-btn" class="hidden" title="Delete all checked messages">Delete Selected</button>
-            <button id="clear-chat-btn" title="Clear chat from your view only">Clear</button>
-            <button id="leave-btn">Leave</button>
-          </div>
-          <div id="messages" class="messages"></div>
-          <form id="message-form">
-            <input id="message-input" autocomplete="off" placeholder="Type a message..." />
-            <input type="file" id="image-input" accept="image/*" class="hidden" />
-            <button type="button" id="image-btn" title="Send an image">📷</button>
-            <button type="submit">Send</button>
-          </form>
+          Add someone by email, then pick them to start chatting — works whether they're online or not.
         </div>
 
         <div id="contact-chat-window" class="hidden">
           <div class="chat-header">
-            <span>Contact: <span id="contact-partner-email"></span></span>
-            <span class="contact-note">Last 5 messages kept · works offline</span>
+            <span>
+              <span id="contact-status-dot" class="status-dot offline"></span>
+              <span id="contact-partner-email"></span>
+            </span>
+            <span class="contact-note">Last 5 messages kept</span>
             <button id="contact-close-btn">Close</button>
           </div>
           <div id="contact-messages" class="messages"></div>
@@ -68,15 +51,6 @@
           </form>
         </div>
       </main>
-    </div>
-  </div>
-
-  <!-- Incoming request modal -->
-  <div id="request-modal" class="modal hidden">
-    <div class="modal-box">
-      <p id="request-text"></p>
-      <button id="accept-btn">Accept</button>
-      <button id="decline-btn">Decline</button>
     </div>
   </div>
 

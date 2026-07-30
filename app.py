@@ -1,43 +1,48 @@
 """
 Auralook chat app.
 
-Two messaging paths, by design:
-1. LIVE chats between two people online at the same time — fully end-to-end
-   encrypted (server never sees plaintext), nothing ever stored, exactly as
-   before.
-2. CONTACTS messaging — add someone by email, message them even while they
-   are offline. This path is stored server-side (encrypted at rest, but the
-   server does hold the key), capped at the 5 most recent messages per
-   conversation, and supports "delete for me" / "delete for everyone".
+ONE unified messaging system: add someone by email, and that becomes a
+single ongoing conversation — whether they're online or not. Messages are
+delivered live instantly if the other person is currently connected, and
+simply wait in storage if they're not; either way it's the exact same chat
+thread, continuing seamlessly once both are online together.
 
-Also includes: Google login, a shared PIN gate, a custom display name step,
-and a 3-minute inactivity auto-logout (enforced client-side + a matching
-server-side session lifetime).
+Design notes:
+- Messages are stored server-side, encrypted at rest (the server does hold
+  the decryption key — this is NOT end-to-end encryption). This is what
+  makes a continuous, always-available conversation possible; true E2EE
+  can't support this because it depends on a live key exchange that has no
+  meaning once a session ends.
+- Only the 5 most recent messages per conversation are ever kept.
+- "Delete for me" hides a message only on the requester's side. "Delete for
+  everyone" permanently deletes it, and is only allowed on messages the
+  requester originally sent (matches WhatsApp's rule).
+- "Online" is just a live presence indicator (a green dot next to a
+  contact's name) — it does NOT create or destroy anything. Minimizing the
+  app, a flaky connection, or briefly disconnecting has zero effect on the
+  conversation itself.
+- Also includes: Google login, a shared PIN gate, a custom display name
+  step, and a 3-minute inactivity auto-logout.
 """
 
 import os
 import uuid
 from datetime import timedelta
 from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
 
 import db
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-
-# Auto-logout after 3 minutes of inactivity — this sets the server-side
-# session lifetime; the client also runs its own inactivity timer (see
-# chat.js) that calls /logout directly so it doesn't need to wait on a
-# request to notice the session expired.
 app.permanent_session_lifetime = timedelta(minutes=3)
 
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
     async_mode="threading",
-    max_http_buffer_size=22 * 1024 * 1024,  # headroom for 15MB images after base64 + JSON overhead
+    max_http_buffer_size=22 * 1024 * 1024,
 )
 
 ACCESS_PIN = os.environ.get("ACCESS_PIN", "bp")
@@ -52,20 +57,17 @@ google = oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
-# Set up the contacts/messages tables if a database is configured.
 try:
     db.init_db()
 except Exception as e:
     print(f"[startup] Database not ready yet: {e}")
 
 # ---------------------------------------------------------------------------
-# IN-MEMORY STATE for the LIVE chat path only — nothing here ever touches
-# disk or a database. Wiped on restart / disconnect, exactly as before.
+# Presence tracking only — purely informational (the little online dot).
+# Never used to gate whether messaging works; that's handled entirely by
+# the persistent contacts system in db.py.
 # ---------------------------------------------------------------------------
-online_users = {}      # sid -> {"name": str, "email": str, "user_id": str}
-pending_requests = {}  # target_sid -> requester_sid
-active_rooms = {}      # sid -> room_id
-email_to_sid = {}      # email -> sid, so contacts messages can be delivered live if the recipient is online
+email_to_sid = {}  # email -> sid, so we know who's currently connected
 
 
 def _require_login():
@@ -94,7 +96,7 @@ def index():
         return redirect(url_for("enter_pin"))
     if not session.get("display_name"):
         return redirect(url_for("set_name"))
-    session.permanent = True  # activates the 3-minute inactivity lifetime
+    session.permanent = True
     return render_template("lobby.html", display_name=session["display_name"], my_email=user["email"])
 
 
@@ -102,8 +104,6 @@ def index():
 def skip_login():
     if not SKIP_GOOGLE_LOGIN:
         return redirect(url_for("index"))
-    # Give each skipped-login session a distinct fake email so contacts/messages
-    # between two guest sessions don't collide with each other.
     session["user"] = {
         "id": "temp-user",
         "name": "Guest",
@@ -136,7 +136,6 @@ def auth_callback():
 def enter_pin():
     if not session.get("user"):
         return redirect(url_for("index"))
-
     error = None
     if request.method == "POST":
         entered = request.form.get("pin", "")
@@ -144,7 +143,6 @@ def enter_pin():
             session["pin_verified"] = True
             return redirect(url_for("index"))
         error = "Incorrect PIN. Try again."
-
     return render_template("pin.html", error=error)
 
 
@@ -152,7 +150,6 @@ def enter_pin():
 def set_name():
     if not session.get("user") or not session.get("pin_verified"):
         return redirect(url_for("index"))
-
     error = None
     if request.method == "POST":
         name = request.form.get("display_name", "").strip()
@@ -163,7 +160,6 @@ def set_name():
         else:
             session["display_name"] = name
             return redirect(url_for("index"))
-
     return render_template("set_name.html", error=error)
 
 
@@ -174,7 +170,7 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
-# Contacts + offline messaging (REST API, backed by Postgres)
+# Contacts + messaging (REST API, backed by Postgres) — THE single chat system
 # ---------------------------------------------------------------------------
 @app.route("/api/contacts/add", methods=["POST"])
 def api_add_contact():
@@ -205,7 +201,11 @@ def api_list_contacts():
         contacts = db.list_contacts(user["email"])
     except Exception as e:
         return jsonify({"error": f"Could not load contacts: {e}"}), 500
-    return jsonify({"contacts": contacts})
+    # Include live presence so the UI can show an online/offline dot
+    online_emails = set(email_to_sid.keys())
+    return jsonify({
+        "contacts": [{"email": c, "online": c.lower() in online_emails} for c in contacts]
+    })
 
 
 @app.route("/api/conversation/<other_email>")
@@ -237,17 +237,13 @@ def api_send_message():
     except Exception as e:
         return jsonify({"error": f"Could not send message: {e}"}), 500
 
-    # If the recipient happens to be online right now, deliver it live too.
+    # Deliver live instantly if the recipient happens to be connected right
+    # now — purely a nice-to-have; the message is safely stored either way.
     recipient_sid = email_to_sid.get(to_email)
     if recipient_sid:
         socketio.emit(
             "contact_message_received",
-            {
-                "id": message_id,
-                "from": user["email"],
-                "text": text,
-                "isMine": False,
-            },
+            {"id": message_id, "from": user["email"], "text": text, "isMine": False},
             room=recipient_sid,
         )
 
@@ -279,7 +275,6 @@ def api_delete_for_everyone():
     if recipient_email is None:
         return jsonify({"error": "You can only delete-for-everyone on messages you sent."}), 403
 
-    # Notify the recipient live if they're online, so it vanishes from their screen too
     recipient_sid = email_to_sid.get(recipient_email)
     if recipient_sid:
         socketio.emit("contact_message_deleted", {"id": message_id}, room=recipient_sid)
@@ -288,122 +283,26 @@ def api_delete_for_everyone():
 
 
 # ---------------------------------------------------------------------------
-# Socket.IO events — presence + live 1-on-1 signaling (unchanged E2EE path)
+# Socket.IO — presence only (the online/offline dot). No chat state lives
+# here at all, so minimizing the app / a dropped connection / reconnecting
+# never affects any conversation.
 # ---------------------------------------------------------------------------
 @socketio.on("connect")
 def on_connect():
     user = session.get("user")
-    display_name = session.get("display_name")
-    if not user or not session.get("pin_verified") or not display_name:
+    if not user or not session.get("pin_verified") or not session.get("display_name"):
         return False
-
-    online_users[request.sid] = {
-        "name": display_name,
-        "email": user["email"],
-        "user_id": user["id"],
-    }
     email_to_sid[user["email"].lower()] = request.sid
-    broadcast_online_list()
+    emit("presence_update", {"email": user["email"].lower(), "online": True}, broadcast=True)
 
 
 @socketio.on("disconnect")
 def on_disconnect():
     sid = request.sid
-    user_info = online_users.pop(sid, None)
-    if user_info:
-        email_to_sid.pop(user_info["email"].lower(), None)
-
-    room_id = active_rooms.pop(sid, None)
-    if room_id:
-        emit("partner_left", {}, room=room_id)
-
-    pending_requests.pop(sid, None)
-    for target, requester in list(pending_requests.items()):
-        if requester == sid:
-            pending_requests.pop(target, None)
-
-    broadcast_online_list()
-
-
-def broadcast_online_list():
-    users = [
-        {"sid": sid, "name": info["name"]}
-        for sid, info in online_users.items()
-    ]
-    emit("online_list", users, broadcast=True)
-
-
-@socketio.on("request_chat")
-def on_request_chat(data):
-    target_sid = data.get("target_sid")
-    if target_sid not in online_users:
-        emit("chat_error", {"message": "That user is no longer online."})
-        return
-    pending_requests[target_sid] = request.sid
-    requester_name = online_users[request.sid]["name"]
-    emit("incoming_request", {"from_sid": request.sid, "from_name": requester_name}, room=target_sid)
-
-
-@socketio.on("respond_chat")
-def on_respond_chat(data):
-    accepted = data.get("accepted")
-    requester_sid = data.get("requester_sid")
-    target_sid = request.sid
-
-    pending_requests.pop(target_sid, None)
-
-    if not accepted:
-        emit("chat_declined", {}, room=requester_sid)
-        return
-
-    if requester_sid not in online_users:
-        emit("chat_error", {"message": "The other user disconnected."})
-        return
-
-    room_id = str(uuid.uuid4())
-    join_room(room_id, sid=requester_sid)
-    join_room(room_id, sid=target_sid)
-    active_rooms[requester_sid] = room_id
-    active_rooms[target_sid] = room_id
-
-    emit("chat_started", {"room": room_id, "with_name": online_users[target_sid]["name"]}, room=requester_sid)
-    emit("chat_started", {"room": room_id, "with_name": online_users[requester_sid]["name"]}, room=target_sid)
-
-
-@socketio.on("exchange_key")
-def on_exchange_key(data):
-    room_id = active_rooms.get(request.sid)
-    if not room_id:
-        return
-    emit("exchange_key", {"publicKey": data.get("publicKey")}, room=room_id, include_self=False)
-
-
-@socketio.on("send_message")
-def on_send_message(data):
-    room_id = active_rooms.get(request.sid)
-    if not room_id:
-        return
-    sender_name = online_users.get(request.sid, {}).get("name", "Unknown")
-    emit(
-        "receive_message",
-        {
-            "iv": data.get("iv"),
-            "data": data.get("data"),
-            "from": sender_name,
-            "msgType": data.get("msgType", "text"),
-            "mimeType": data.get("mimeType"),
-        },
-        room=room_id,
-        include_self=False,
-    )
-
-
-@socketio.on("leave_chat")
-def on_leave_chat():
-    room_id = active_rooms.pop(request.sid, None)
-    if room_id:
-        leave_room(room_id)
-        emit("partner_left", {}, room=room_id)
+    email = next((e for e, s in email_to_sid.items() if s == sid), None)
+    if email:
+        email_to_sid.pop(email, None)
+        emit("presence_update", {"email": email, "online": False}, broadcast=True)
 
 
 if __name__ == "__main__":
