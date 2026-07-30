@@ -357,3 +357,201 @@ deleteSelectedBtn.onclick = () => {
   const checked = messagesEl.querySelectorAll(".msg-select-checkbox:checked");
   checked.forEach((cb) => cb.closest(".message").remove());
 };
+
+// ===========================================================================
+// CONTACTS — message someone by email even while they're offline.
+// This is a SEPARATE, simpler path from the live E2EE chat above:
+//   - Stored server-side (encrypted at rest, NOT end-to-end)
+//   - Only the 5 most recent messages per conversation are kept
+//   - Text only (no images)
+//   - Two delete modes: "delete for me" (hides only on your screen) and
+//     "delete for everyone" (permanent, only on messages YOU sent)
+// ===========================================================================
+
+const myEmail = document.body.dataset.myEmail;
+
+const contactsListEl = document.getElementById("contacts-list");
+const addContactForm = document.getElementById("add-contact-form");
+const addContactInput = document.getElementById("add-contact-input");
+const addContactError = document.getElementById("add-contact-error");
+
+const contactChatWindowEl = document.getElementById("contact-chat-window");
+const contactPartnerEmailEl = document.getElementById("contact-partner-email");
+const contactMessagesEl = document.getElementById("contact-messages");
+const contactMessageForm = document.getElementById("contact-message-form");
+const contactMessageInput = document.getElementById("contact-message-input");
+const contactCloseBtn = document.getElementById("contact-close-btn");
+
+let currentContactEmail = null;
+
+async function loadContacts() {
+  try {
+    const res = await fetch("/api/contacts/list");
+    const data = await res.json();
+    if (data.error) return; // e.g. DATABASE_URL not configured yet — fail quietly in the UI
+    renderContactsList(data.contacts || []);
+  } catch (e) {
+    console.error("Failed to load contacts:", e);
+  }
+}
+
+function renderContactsList(emails) {
+  contactsListEl.innerHTML = "";
+  emails.forEach((email) => {
+    const li = document.createElement("li");
+    li.textContent = email;
+    li.className = "contact-item";
+    li.onclick = () => openContactChat(email);
+    contactsListEl.appendChild(li);
+  });
+}
+
+addContactForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const email = addContactInput.value.trim().toLowerCase();
+  addContactError.classList.add("hidden");
+  try {
+    const res = await fetch("/api/contacts/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      addContactError.textContent = data.error;
+      addContactError.classList.remove("hidden");
+      return;
+    }
+    addContactInput.value = "";
+    loadContacts();
+  } catch (err) {
+    addContactError.textContent = "Could not add contact. Please try again.";
+    addContactError.classList.remove("hidden");
+  }
+};
+
+async function openContactChat(email) {
+  currentContactEmail = email;
+  contactPartnerEmailEl.textContent = email;
+
+  noChatEl.classList.add("hidden");
+  chatWindowEl.classList.add("hidden");
+  contactChatWindowEl.classList.remove("hidden");
+  contactMessagesEl.innerHTML = "Loading...";
+
+  try {
+    const res = await fetch(`/api/conversation/${encodeURIComponent(email)}`);
+    const data = await res.json();
+    contactMessagesEl.innerHTML = "";
+    (data.messages || []).forEach((m) => appendContactMessage(m));
+  } catch (e) {
+    contactMessagesEl.innerHTML = "Could not load this conversation.";
+  }
+}
+
+contactCloseBtn.onclick = () => {
+  currentContactEmail = null;
+  contactChatWindowEl.classList.add("hidden");
+  noChatEl.classList.remove("hidden");
+};
+
+contactMessageForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const text = contactMessageInput.value.trim();
+  if (!text || !currentContactEmail) return;
+  contactMessageInput.value = "";
+
+  try {
+    const res = await fetch("/api/message/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to_email: currentContactEmail, text }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+    appendContactMessage({ id: data.id, from: myEmail, isMine: true, text });
+  } catch (err) {
+    alert("Could not send that message. Please try again.");
+  }
+};
+
+function appendContactMessage(m) {
+  const div = document.createElement("div");
+  div.className = `message ${m.isMine ? "mine" : "theirs"}`;
+  div.dataset.messageId = m.id;
+  div.textContent = `${m.isMine ? "You" : m.from}: ${m.text}`;
+
+  const actions = document.createElement("div");
+  actions.className = "contact-msg-actions";
+
+  const deleteForMeBtn = document.createElement("button");
+  deleteForMeBtn.textContent = "Delete for me";
+  deleteForMeBtn.onclick = () => deleteContactMessage(m.id, "delete-for-me", div);
+  actions.appendChild(deleteForMeBtn);
+
+  if (m.isMine) {
+    const deleteForEveryoneBtn = document.createElement("button");
+    deleteForEveryoneBtn.textContent = "Delete for everyone";
+    deleteForEveryoneBtn.onclick = () => deleteContactMessage(m.id, "delete-for-everyone", div);
+    actions.appendChild(deleteForEveryoneBtn);
+  }
+
+  div.appendChild(actions);
+  contactMessagesEl.appendChild(div);
+  contactMessagesEl.scrollTop = contactMessagesEl.scrollHeight;
+}
+
+async function deleteContactMessage(id, endpoint, el) {
+  try {
+    const res = await fetch(`/api/message/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+    el.remove();
+  } catch (err) {
+    alert("Could not delete that message. Please try again.");
+  }
+}
+
+// Live delivery: if the person we're chatting with (via contacts) is online
+// right now, the server pushes it straight to us instead of waiting for a
+// page reload.
+socket.on("contact_message_received", (m) => {
+  if (currentContactEmail && m.from.toLowerCase() === currentContactEmail.toLowerCase()) {
+    appendContactMessage(m);
+  }
+});
+
+socket.on("contact_message_deleted", ({ id }) => {
+  const el = contactMessagesEl.querySelector(`[data-message-id="${id}"]`);
+  if (el) el.remove();
+});
+
+loadContacts();
+
+// ===========================================================================
+// AUTO-LOGOUT after 3 minutes of inactivity
+// ===========================================================================
+const INACTIVITY_LIMIT_MS = 3 * 60 * 1000;
+let inactivityTimer = null;
+
+function resetInactivityTimer() {
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(() => {
+    window.location.href = "/logout";
+  }, INACTIVITY_LIMIT_MS);
+}
+
+["mousemove", "mousedown", "keydown", "touchstart", "scroll"].forEach((evt) => {
+  document.addEventListener(evt, resetInactivityTimer, { passive: true });
+});
+resetInactivityTimer();

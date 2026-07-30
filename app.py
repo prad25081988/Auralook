@@ -1,23 +1,38 @@
 """
-Live-only chat app.
-- Login with Google account
-- Enter a shared PIN to prove you're allowed in
-- Pick a display name to show instead of your Google name
-- See who else is online right now
-- Request to chat 1-on-1
-- Messages travel ONLY through the live socket connection
-- Nothing is ever written to a database or file.
-  Close the tab / disconnect => the conversation is gone forever.
+Auralook chat app.
+
+Two messaging paths, by design:
+1. LIVE chats between two people online at the same time — fully end-to-end
+   encrypted (server never sees plaintext), nothing ever stored, exactly as
+   before.
+2. CONTACTS messaging — add someone by email, message them even while they
+   are offline. This path is stored server-side (encrypted at rest, but the
+   server does hold the key), capped at the 5 most recent messages per
+   conversation, and supports "delete for me" / "delete for everyone".
+
+Also includes: Google login, a shared PIN gate, a custom display name step,
+and a 3-minute inactivity auto-logout (enforced client-side + a matching
+server-side session lifetime).
 """
 
 import os
 import uuid
-from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory
+from datetime import timedelta
+from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from authlib.integrations.flask_client import OAuth
 
+import db
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+
+# Auto-logout after 3 minutes of inactivity — this sets the server-side
+# session lifetime; the client also runs its own inactivity timer (see
+# chat.js) that calls /logout directly so it doesn't need to wait on a
+# request to notice the session expired.
+app.permanent_session_lifetime = timedelta(minutes=3)
+
 socketio = SocketIO(
     app,
     cors_allowed_origins="*",
@@ -25,27 +40,9 @@ socketio = SocketIO(
     max_http_buffer_size=22 * 1024 * 1024,  # headroom for 15MB images after base64 + JSON overhead
 )
 
-# ---------------------------------------------------------------------------
-# Shared access PIN — anyone who logs in with Google still needs this to
-# get past the gate. Change it here, or override with an env var.
-# ---------------------------------------------------------------------------
 ACCESS_PIN = os.environ.get("ACCESS_PIN", "bp")
-
-# ---------------------------------------------------------------------------
-# TEMPORARY bypass switch for Google login. Set SKIP_GOOGLE_LOGIN=true as an
-# env var to enable the "Continue without Google" button on the login page.
-# Leave unset (or false) to keep Google login as the only way in — this flag
-# defaults to OFF so nothing changes unless you explicitly turn it on.
-# ---------------------------------------------------------------------------
 SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true"
 
-# ---------------------------------------------------------------------------
-# Google OAuth setup
-# You must create your own credentials at https://console.cloud.google.com/
-# and set them as environment variables before running:
-#   GOOGLE_CLIENT_ID=xxxx
-#   GOOGLE_CLIENT_SECRET=xxxx
-# ---------------------------------------------------------------------------
 oauth = OAuth(app)
 google = oauth.register(
     name="google",
@@ -55,14 +52,27 @@ google = oauth.register(
     client_kwargs={"scope": "openid email profile"},
 )
 
+# Set up the contacts/messages tables if a database is configured.
+try:
+    db.init_db()
+except Exception as e:
+    print(f"[startup] Database not ready yet: {e}")
+
 # ---------------------------------------------------------------------------
-# IN-MEMORY STATE ONLY — nothing here ever touches disk or a database.
-# All of this is wiped the moment the server restarts, and per-user entries
-# are wiped the moment that user disconnects.
+# IN-MEMORY STATE for the LIVE chat path only — nothing here ever touches
+# disk or a database. Wiped on restart / disconnect, exactly as before.
 # ---------------------------------------------------------------------------
 online_users = {}      # sid -> {"name": str, "email": str, "user_id": str}
 pending_requests = {}  # target_sid -> requester_sid
-active_rooms = {}      # sid -> room_id (so we know who is currently chatting)
+active_rooms = {}      # sid -> room_id
+email_to_sid = {}      # email -> sid, so contacts messages can be delivered live if the recipient is online
+
+
+def _require_login():
+    user = session.get("user")
+    if not user or not session.get("pin_verified") or not session.get("display_name"):
+        return None
+    return user
 
 
 # ---------------------------------------------------------------------------
@@ -84,20 +94,20 @@ def index():
         return redirect(url_for("enter_pin"))
     if not session.get("display_name"):
         return redirect(url_for("set_name"))
-    return render_template("lobby.html", display_name=session["display_name"])
+    session.permanent = True  # activates the 3-minute inactivity lifetime
+    return render_template("lobby.html", display_name=session["display_name"], my_email=user["email"])
 
 
 @app.route("/skip-login")
 def skip_login():
-    # Temporary bypass — does NOT touch the Google OAuth code at all.
-    # Only works while SKIP_GOOGLE_LOGIN is true. Flip that flag off
-    # (or remove this route) to fully restore Google-only login.
     if not SKIP_GOOGLE_LOGIN:
         return redirect(url_for("index"))
+    # Give each skipped-login session a distinct fake email so contacts/messages
+    # between two guest sessions don't collide with each other.
     session["user"] = {
         "id": "temp-user",
         "name": "Guest",
-        "email": "guest@example.com",
+        "email": f"guest-{uuid.uuid4().hex[:8]}@example.com",
         "picture": None,
     }
     return redirect(url_for("index"))
@@ -164,34 +174,149 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
-# Socket.IO events — presence + signaling + relaying chat messages live
+# Contacts + offline messaging (REST API, backed by Postgres)
+# ---------------------------------------------------------------------------
+@app.route("/api/contacts/add", methods=["POST"])
+def api_add_contact():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+
+    contact_email = (request.json or {}).get("email", "").strip().lower()
+    if not contact_email or "@" not in contact_email:
+        return jsonify({"error": "Please enter a valid email address."}), 400
+    if contact_email == user["email"].lower():
+        return jsonify({"error": "You can't add yourself."}), 400
+
+    try:
+        db.add_contact(user["email"], contact_email)
+    except Exception as e:
+        return jsonify({"error": f"Could not add contact: {e}"}), 500
+
+    return jsonify({"ok": True, "email": contact_email})
+
+
+@app.route("/api/contacts/list")
+def api_list_contacts():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    try:
+        contacts = db.list_contacts(user["email"])
+    except Exception as e:
+        return jsonify({"error": f"Could not load contacts: {e}"}), 500
+    return jsonify({"contacts": contacts})
+
+
+@app.route("/api/conversation/<other_email>")
+def api_get_conversation(other_email):
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    try:
+        messages = db.get_conversation(user["email"], other_email)
+    except Exception as e:
+        return jsonify({"error": f"Could not load conversation: {e}"}), 500
+    return jsonify({"messages": messages})
+
+
+@app.route("/api/message/send", methods=["POST"])
+def api_send_message():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+
+    body = request.json or {}
+    to_email = body.get("to_email", "").strip().lower()
+    text = body.get("text", "").strip()
+    if not to_email or not text:
+        return jsonify({"error": "Missing recipient or message text."}), 400
+
+    try:
+        message_id = db.send_message(user["email"], to_email, text)
+    except Exception as e:
+        return jsonify({"error": f"Could not send message: {e}"}), 500
+
+    # If the recipient happens to be online right now, deliver it live too.
+    recipient_sid = email_to_sid.get(to_email)
+    if recipient_sid:
+        socketio.emit(
+            "contact_message_received",
+            {
+                "id": message_id,
+                "from": user["email"],
+                "text": text,
+                "isMine": False,
+            },
+            room=recipient_sid,
+        )
+
+    return jsonify({"ok": True, "id": message_id})
+
+
+@app.route("/api/message/delete-for-me", methods=["POST"])
+def api_delete_for_me():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    message_id = (request.json or {}).get("id")
+    if not message_id:
+        return jsonify({"error": "Missing message id."}), 400
+    ok = db.delete_for_me(message_id, user["email"])
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/message/delete-for-everyone", methods=["POST"])
+def api_delete_for_everyone():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    message_id = (request.json or {}).get("id")
+    if not message_id:
+        return jsonify({"error": "Missing message id."}), 400
+
+    recipient_email = db.delete_for_everyone(message_id, user["email"])
+    if recipient_email is None:
+        return jsonify({"error": "You can only delete-for-everyone on messages you sent."}), 403
+
+    # Notify the recipient live if they're online, so it vanishes from their screen too
+    recipient_sid = email_to_sid.get(recipient_email)
+    if recipient_sid:
+        socketio.emit("contact_message_deleted", {"id": message_id}, room=recipient_sid)
+
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# Socket.IO events — presence + live 1-on-1 signaling (unchanged E2EE path)
 # ---------------------------------------------------------------------------
 @socketio.on("connect")
 def on_connect():
     user = session.get("user")
     display_name = session.get("display_name")
     if not user or not session.get("pin_verified") or not display_name:
-        return False  # reject unauthenticated / incomplete-setup sockets
+        return False
 
     online_users[request.sid] = {
         "name": display_name,
         "email": user["email"],
         "user_id": user["id"],
     }
+    email_to_sid[user["email"].lower()] = request.sid
     broadcast_online_list()
 
 
 @socketio.on("disconnect")
 def on_disconnect():
     sid = request.sid
-    online_users.pop(sid, None)
+    user_info = online_users.pop(sid, None)
+    if user_info:
+        email_to_sid.pop(user_info["email"].lower(), None)
 
-    # If they were in a room, tell the partner and tear the room down
     room_id = active_rooms.pop(sid, None)
     if room_id:
         emit("partner_left", {}, room=room_id)
 
-    # Clean up any pending request pointing at/from this sid
     pending_requests.pop(sid, None)
     for target, requester in list(pending_requests.items()):
         if requester == sid:
@@ -250,8 +375,6 @@ def on_exchange_key(data):
     room_id = active_rooms.get(request.sid)
     if not room_id:
         return
-    # Just relay the public key blindly — server never sees the private key
-    # or the resulting shared secret, so it can never decrypt messages.
     emit("exchange_key", {"publicKey": data.get("publicKey")}, room=room_id, include_self=False)
 
 
@@ -261,9 +384,6 @@ def on_send_message(data):
     if not room_id:
         return
     sender_name = online_users.get(request.sid, {}).get("name", "Unknown")
-    # The server only ever sees the encrypted blob (iv + ciphertext).
-    # It has no key to decrypt it and never stores it anywhere — same
-    # rule applies whether this is a text message or an image.
     emit(
         "receive_message",
         {

@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-title" content="Auralook" />
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
-<body>
+<body data-my-email="{{ my_email }}">
   <div class="app-shell">
     <header class="topbar">
       <span>Signed in as <strong>{{ display_name }}</strong></span>
@@ -23,11 +23,19 @@
       <aside class="sidebar">
         <h2>Online now</h2>
         <ul id="online-list"></ul>
+
+        <h2 class="contacts-heading">Contacts</h2>
+        <form id="add-contact-form" class="add-contact-form">
+          <input id="add-contact-input" type="email" placeholder="Add by email" required />
+          <button type="submit">+</button>
+        </form>
+        <p id="add-contact-error" class="error-text hidden"></p>
+        <ul id="contacts-list"></ul>
       </aside>
 
       <main class="chat-area">
         <div id="no-chat" class="placeholder">
-          Pick someone online to start a live chat. Nothing is saved — ever.
+          Pick someone online for a live encrypted chat, or a contact to message anytime.
         </div>
 
         <div id="chat-window" class="hidden">
@@ -43,6 +51,19 @@
             <input id="message-input" autocomplete="off" placeholder="Type a message..." />
             <input type="file" id="image-input" accept="image/*" class="hidden" />
             <button type="button" id="image-btn" title="Send an image">📷</button>
+            <button type="submit">Send</button>
+          </form>
+        </div>
+
+        <div id="contact-chat-window" class="hidden">
+          <div class="chat-header">
+            <span>Contact: <span id="contact-partner-email"></span></span>
+            <span class="contact-note">Last 5 messages kept · works offline</span>
+            <button id="contact-close-btn">Close</button>
+          </div>
+          <div id="contact-messages" class="messages"></div>
+          <form id="contact-message-form">
+            <input id="contact-message-input" autocomplete="off" placeholder="Type a message..." />
             <button type="submit">Send</button>
           </form>
         </div>
