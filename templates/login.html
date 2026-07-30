@@ -38,6 +38,8 @@
   </div>
 
   <script>
+    sessionStorage.setItem("auralook_ctx_active", "true");
+
     (function () {
       var justLocked = {{ 'true' if locked else 'false' }};
       if (justLocked) {

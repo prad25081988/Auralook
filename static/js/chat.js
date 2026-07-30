@@ -455,12 +455,22 @@ document.addEventListener("visibilitychange", () => {
 // ===========================================================================
 // QUIT DETECTION — fully closing the app (swiping it away, force-closing)
 // should log out immediately, unlike just minimizing which follows the
-// normal 2-minute inactivity timer above. Browsers don't give a perfectly
-// guaranteed "the app was just killed" signal, but "pagehide" firing is the
-// closest reliable one: it fires when the page is actually being unloaded
-// or discarded, not on a simple minimize/background. Sending this as a
-// best-effort beacon covers the vast majority of real "quit the app" cases.
-// ===========================================================================
-window.addEventListener("pagehide", () => {
-  navigator.sendBeacon("/logout");
-});
+// normal 2-minute inactivity timer above.
+//
+// sessionStorage is the right tool here: it's tied to the actual lifetime of
+// this browsing context/tab and is guaranteed by the browser to be wiped the
+// moment that context is truly destroyed — no JS needs to run during the
+// kill for this to happen, unlike events such as "pagehide" which can be
+// skipped entirely if the OS terminates the process abruptly. Every page in
+// the app (login, pin, set-name, lobby) marks this same flag the moment it
+// loads. If the lobby ever loads WITHOUT that flag already present, it means
+// this is a brand new browsing context that skipped straight to the lobby —
+// which only happens if the app was fully quit and reopened while the login
+// cookie was still otherwise valid. In that case, force a fresh login.
+(function () {
+  const alreadyActive = sessionStorage.getItem("auralook_ctx_active") === "true";
+  sessionStorage.setItem("auralook_ctx_active", "true");
+  if (!alreadyActive) {
+    goToLogin();
+  }
+})();
