@@ -21,7 +21,10 @@
 
     <div class="layout">
       <aside class="sidebar">
-        <h2>Chats</h2>
+        <h2>Online now</h2>
+        <ul id="online-users-list"></ul>
+
+        <h2 class="section-gap">Chats</h2>
         <form id="add-contact-form" class="add-contact-form">
           <input id="add-contact-input" type="email" placeholder="Add by email" required />
           <button type="submit">+</button>
@@ -39,7 +42,7 @@
           <div class="chat-header">
             <span>
               <span id="contact-status-dot" class="status-dot offline"></span>
-              <span id="contact-partner-email"></span>
+              <span id="contact-partner-name"></span>
             </span>
             <span class="contact-note">Last 5 messages kept</span>
             <button id="contact-close-btn">Close</button>
@@ -50,7 +53,28 @@
             <button type="submit">Send</button>
           </form>
         </div>
+
+        <div id="ephemeral-chat-window" class="hidden">
+          <div class="chat-header">
+            <span>Chatting with <span id="ephemeral-partner-name"></span> <span class="contact-note">(not saved — ends if either leaves)</span></span>
+            <button id="ephemeral-leave-btn">Leave</button>
+          </div>
+          <div id="ephemeral-messages" class="messages"></div>
+          <form id="ephemeral-message-form">
+            <input id="ephemeral-message-input" autocomplete="off" placeholder="Type a message..." />
+            <button type="submit">Send</button>
+          </form>
+        </div>
       </main>
+    </div>
+  </div>
+
+  <!-- Incoming chat request modal (only shown for non-contacts) -->
+  <div id="request-modal" class="modal hidden">
+    <div class="modal-box">
+      <p id="request-text"></p>
+      <button id="accept-btn">Accept</button>
+      <button id="decline-btn">Decline</button>
     </div>
   </div>
 

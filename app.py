@@ -29,7 +29,7 @@ import os
 import uuid
 from datetime import timedelta
 from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 from authlib.integrations.flask_client import OAuth
 
 import db
@@ -68,6 +68,7 @@ except Exception as e:
 # the persistent contacts system in db.py.
 # ---------------------------------------------------------------------------
 email_to_sid = {}  # email -> sid, so we know who's currently connected
+online_users_info = {}  # email -> {"name": str, "sid": str} — full presence for the "Online now" discovery list
 
 
 def _require_login():
@@ -159,6 +160,10 @@ def set_name():
             error = "Please keep it under 30 characters."
         else:
             session["display_name"] = name
+            try:
+                db.upsert_user_name(session["user"]["email"], name)
+            except Exception as e:
+                print(f"[set_name] Could not save display name to users table: {e}")
             return redirect(url_for("index"))
     return render_template("set_name.html", error=error)
 
@@ -192,20 +197,34 @@ def api_add_contact():
     return jsonify({"ok": True, "email": contact_email})
 
 
+@app.route("/api/contacts/remove", methods=["POST"])
+def api_remove_contact():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    contact_email = (request.json or {}).get("email", "").strip().lower()
+    if not contact_email:
+        return jsonify({"error": "Missing email."}), 400
+    try:
+        db.remove_contact(user["email"], contact_email)
+    except Exception as e:
+        return jsonify({"error": f"Could not remove contact: {e}"}), 500
+    return jsonify({"ok": True})
+
+
 @app.route("/api/contacts/list")
 def api_list_contacts():
     user = _require_login()
     if not user:
         return jsonify({"error": "Not logged in"}), 401
     try:
-        contacts = db.list_contacts(user["email"])
+        contacts = db.list_contacts(user["email"])  # each: {"email": ..., "displayName": ...}
     except Exception as e:
         return jsonify({"error": f"Could not load contacts: {e}"}), 500
-    # Include live presence so the UI can show an online/offline dot
     online_emails = set(email_to_sid.keys())
-    return jsonify({
-        "contacts": [{"email": c, "online": c.lower() in online_emails} for c in contacts]
-    })
+    for c in contacts:
+        c["online"] = c["email"].lower() in online_emails
+    return jsonify({"contacts": contacts})
 
 
 @app.route("/api/conversation/<other_email>")
@@ -283,17 +302,91 @@ def api_delete_for_everyone():
 
 
 # ---------------------------------------------------------------------------
-# Socket.IO — presence only (the online/offline dot). No chat state lives
-# here at all, so minimizing the app / a dropped connection / reconnecting
-# never affects any conversation.
+# EPHEMERAL chat — only used for people who are online but NOT yet added as
+# a contact. Requires the other person to accept a request first, and the
+# chat ends the moment either side disconnects. Nothing here is stored
+# anywhere, ever — this is separate from and unrelated to the persistent
+# contacts system above.
+# ---------------------------------------------------------------------------
+pending_requests = {}   # target_sid -> requester_sid
+ephemeral_rooms = {}    # sid -> room_id
+
+
+@socketio.on("request_chat")
+def on_request_chat(data):
+    target_email = (data.get("target_email") or "").lower()
+    target_sid = email_to_sid.get(target_email)
+    if not target_sid:
+        emit("chat_error", {"message": "That user is no longer online."})
+        return
+    pending_requests[target_sid] = request.sid
+    requester_email = next((e for e, s in email_to_sid.items() if s == request.sid), None)
+    requester_name = online_users_info.get(requester_email, {}).get("name", "Someone")
+    emit("incoming_request", {"from_sid": request.sid, "from_name": requester_name}, room=target_sid)
+
+
+@socketio.on("respond_chat")
+def on_respond_chat(data):
+    accepted = data.get("accepted")
+    requester_sid = data.get("requester_sid")
+    target_sid = request.sid
+    pending_requests.pop(target_sid, None)
+
+    if not accepted:
+        emit("chat_declined", {}, room=requester_sid)
+        return
+
+    if requester_sid not in email_to_sid.values():
+        emit("chat_error", {"message": "The other user disconnected."})
+        return
+
+    room_id = uuid.uuid4().hex
+    join_room(room_id, sid=requester_sid)
+    join_room(room_id, sid=target_sid)
+    ephemeral_rooms[requester_sid] = room_id
+    ephemeral_rooms[target_sid] = room_id
+
+    target_email = next((e for e, s in email_to_sid.items() if s == target_sid), None)
+    requester_email = next((e for e, s in email_to_sid.items() if s == requester_sid), None)
+    emit("chat_started", {"room": room_id, "with_name": online_users_info.get(target_email, {}).get("name", "Someone")}, room=requester_sid)
+    emit("chat_started", {"room": room_id, "with_name": online_users_info.get(requester_email, {}).get("name", "Someone")}, room=target_sid)
+
+
+@socketio.on("ephemeral_message")
+def on_ephemeral_message(data):
+    room_id = ephemeral_rooms.get(request.sid)
+    if not room_id:
+        return
+    sender_email = next((e for e, s in email_to_sid.items() if s == request.sid), None)
+    sender_name = online_users_info.get(sender_email, {}).get("name", "Unknown")
+    emit("ephemeral_message", {"text": data.get("text", ""), "from": sender_name}, room=room_id, include_self=False)
+
+
+@socketio.on("leave_ephemeral_chat")
+def on_leave_ephemeral_chat():
+    room_id = ephemeral_rooms.pop(request.sid, None)
+    if room_id:
+        leave_room(room_id)
+        emit("ephemeral_partner_left", {}, room=room_id)
+
+
+# ---------------------------------------------------------------------------
+# Socket.IO — presence only. No PERSISTENT chat state lives here at all, so
+# minimizing the app / a dropped connection / reconnecting never affects
+# any saved conversation. Used for: the little online dot on saved
+# contacts, the "Online now" discovery list, and (above) the ephemeral
+# permission-based chat for people not yet added.
 # ---------------------------------------------------------------------------
 @socketio.on("connect")
 def on_connect():
     user = session.get("user")
     if not user or not session.get("pin_verified") or not session.get("display_name"):
         return False
-    email_to_sid[user["email"].lower()] = request.sid
-    emit("presence_update", {"email": user["email"].lower(), "online": True}, broadcast=True)
+    email = user["email"].lower()
+    email_to_sid[email] = request.sid
+    online_users_info[email] = {"name": session.get("display_name"), "email": email}
+    emit("presence_update", {"email": email, "online": True}, broadcast=True)
+    broadcast_online_users()
 
 
 @socketio.on("disconnect")
@@ -302,7 +395,24 @@ def on_disconnect():
     email = next((e for e, s in email_to_sid.items() if s == sid), None)
     if email:
         email_to_sid.pop(email, None)
+        online_users_info.pop(email, None)
         emit("presence_update", {"email": email, "online": False}, broadcast=True)
+        broadcast_online_users()
+
+    # If they were in an ephemeral chat, end it and tell the other side —
+    # this is the "disappears once offline" behavior for non-contacts.
+    room_id = ephemeral_rooms.pop(sid, None)
+    if room_id:
+        emit("ephemeral_partner_left", {}, room=room_id)
+    pending_requests.pop(sid, None)
+    for target, requester in list(pending_requests.items()):
+        if requester == sid:
+            pending_requests.pop(target, None)
+
+
+def broadcast_online_users():
+    users = list(online_users_info.values())
+    emit("online_users_update", {"users": users}, broadcast=True)
 
 
 if __name__ == "__main__":

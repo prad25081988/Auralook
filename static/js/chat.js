@@ -1,13 +1,18 @@
-// Auralook — unified chat system.
-// One conversation per contact, whether they're online or not. Presence
-// (the little dot) is purely informational and never affects the chat
-// itself — messages are always stored and always available, live-delivered
-// instantly when the other person happens to be connected.
+// Auralook — chat logic.
+//
+// Two separate systems, by design:
+// 1. CONTACTS (persistent) — added once, then chat anytime online or
+//    offline, no permission needed, capped at 5 most recent messages.
+// 2. EPHEMERAL (temporary) — for people online but not yet added. Requires
+//    the other person to accept a request, and disappears the instant
+//    either side disconnects. Nothing here is ever stored.
 
 const socket = io();
 const myEmail = document.body.dataset.myEmail;
 
+// --- Contacts (persistent) elements ---
 const contactsListEl = document.getElementById("contacts-list");
+const onlineUsersListEl = document.getElementById("online-users-list");
 const addContactForm = document.getElementById("add-contact-form");
 const addContactInput = document.getElementById("add-contact-input");
 const addContactError = document.getElementById("add-contact-error");
@@ -15,22 +20,49 @@ const addContactError = document.getElementById("add-contact-error");
 const noChatEl = document.getElementById("no-chat");
 const contactChatWindowEl = document.getElementById("contact-chat-window");
 const contactStatusDotEl = document.getElementById("contact-status-dot");
-const contactPartnerEmailEl = document.getElementById("contact-partner-email");
+const contactPartnerNameEl = document.getElementById("contact-partner-name");
 const contactMessagesEl = document.getElementById("contact-messages");
 const contactMessageForm = document.getElementById("contact-message-form");
 const contactMessageInput = document.getElementById("contact-message-input");
 const contactCloseBtn = document.getElementById("contact-close-btn");
 
-let currentContactEmail = null;
-let onlineEmails = new Set(); // updated live via presence_update events
+// --- Ephemeral (temporary, permission-based) elements ---
+const ephemeralChatWindowEl = document.getElementById("ephemeral-chat-window");
+const ephemeralPartnerNameEl = document.getElementById("ephemeral-partner-name");
+const ephemeralMessagesEl = document.getElementById("ephemeral-messages");
+const ephemeralMessageForm = document.getElementById("ephemeral-message-form");
+const ephemeralMessageInput = document.getElementById("ephemeral-message-input");
+const ephemeralLeaveBtn = document.getElementById("ephemeral-leave-btn");
 
+const modalEl = document.getElementById("request-modal");
+const requestTextEl = document.getElementById("request-text");
+const acceptBtn = document.getElementById("accept-btn");
+const declineBtn = document.getElementById("decline-btn");
+
+let currentContactEmail = null;
+let currentContactName = null;
+let onlineEmails = new Set();
+let myContactEmails = new Set();
+let latestOnlineUsers = []; // [{email, name}]
+let pendingRequesterSid = null;
+
+function hideAllChatWindows() {
+  noChatEl.classList.add("hidden");
+  contactChatWindowEl.classList.add("hidden");
+  ephemeralChatWindowEl.classList.add("hidden");
+}
+
+// ===========================================================================
+// CONTACTS (persistent)
+// ===========================================================================
 async function loadContacts() {
   try {
     const res = await fetch("/api/contacts/list");
     const data = await res.json();
     if (data.error) return;
-    onlineEmails = new Set((data.contacts || []).filter((c) => c.online).map((c) => c.email));
+    myContactEmails = new Set((data.contacts || []).map((c) => c.email.toLowerCase()));
     renderContactsList(data.contacts || []);
+    renderOnlineUsersList();
   } catch (e) {
     console.error("Failed to load contacts:", e);
   }
@@ -38,7 +70,7 @@ async function loadContacts() {
 
 function renderContactsList(contacts) {
   contactsListEl.innerHTML = "";
-  contacts.forEach(({ email, online }) => {
+  contacts.forEach(({ email, displayName, online }) => {
     const li = document.createElement("li");
     li.className = "contact-item";
     li.dataset.email = email;
@@ -48,10 +80,31 @@ function renderContactsList(contacts) {
     li.appendChild(dot);
 
     const label = document.createElement("span");
-    label.textContent = email;
+    label.className = "contact-label";
+    label.textContent = displayName || email;
+    label.onclick = () => openContactChat(email, displayName || email);
     li.appendChild(label);
 
-    li.onclick = () => openContactChat(email);
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "remove-contact-btn";
+    removeBtn.textContent = "Remove";
+    removeBtn.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Remove ${displayName || email} from your chats?`)) return;
+      try {
+        await fetch("/api/contacts/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        if (currentContactEmail === email) contactCloseBtn.click();
+        loadContacts();
+      } catch (err) {
+        alert("Could not remove this contact. Please try again.");
+      }
+    };
+    li.appendChild(removeBtn);
+
     contactsListEl.appendChild(li);
   });
 }
@@ -80,12 +133,31 @@ addContactForm.onsubmit = async (e) => {
   }
 };
 
-async function openContactChat(email) {
+async function addContactByEmail(email) {
+  try {
+    const res = await fetch("/api/contacts/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+    loadContacts();
+  } catch (err) {
+    alert("Could not add this contact. Please try again.");
+  }
+}
+
+async function openContactChat(email, displayName) {
   currentContactEmail = email;
-  contactPartnerEmailEl.textContent = email;
+  currentContactName = displayName;
+  contactPartnerNameEl.textContent = displayName;
   updateContactStatusDot();
 
-  noChatEl.classList.add("hidden");
+  hideAllChatWindows();
   contactChatWindowEl.classList.remove("hidden");
   contactMessagesEl.innerHTML = "Loading...";
 
@@ -107,7 +179,8 @@ function updateContactStatusDot() {
 
 contactCloseBtn.onclick = () => {
   currentContactEmail = null;
-  contactChatWindowEl.classList.add("hidden");
+  currentContactName = null;
+  hideAllChatWindows();
   noChatEl.classList.remove("hidden");
 };
 
@@ -116,7 +189,6 @@ contactMessageForm.onsubmit = async (e) => {
   const text = contactMessageInput.value.trim();
   if (!text || !currentContactEmail) return;
   contactMessageInput.value = "";
-
   try {
     const res = await fetch("/api/message/send", {
       method: "POST",
@@ -138,7 +210,7 @@ function appendContactMessage(m) {
   const div = document.createElement("div");
   div.className = `message ${m.isMine ? "mine" : "theirs"}`;
   div.dataset.messageId = m.id;
-  div.textContent = `${m.isMine ? "You" : m.from}: ${m.text}`;
+  div.textContent = `${m.isMine ? "You" : currentContactName || m.from}: ${m.text}`;
 
   const actions = document.createElement("div");
   actions.className = "contact-msg-actions";
@@ -178,8 +250,6 @@ async function deleteContactMessage(id, endpoint, el) {
   }
 }
 
-// Live delivery — same conversation, just pushed instantly if the other
-// person happens to be connected right now.
 socket.on("contact_message_received", (m) => {
   if (currentContactEmail && m.from.toLowerCase() === currentContactEmail.toLowerCase()) {
     appendContactMessage(m);
@@ -191,8 +261,126 @@ socket.on("contact_message_deleted", ({ id }) => {
   if (el) el.remove();
 });
 
-// Presence — purely a visual dot next to each contact and in the open chat
-// header. Never affects whether messaging works.
+// ===========================================================================
+// "Online now" discovery list — anyone connected who ISN'T already a
+// contact. Has both an Add button (saves them permanently, no permission
+// chat needed from then on) and a Chat button (starts a permission-based
+// ephemeral chat instead).
+// ===========================================================================
+function renderOnlineUsersList() {
+  onlineUsersListEl.innerHTML = "";
+  const others = latestOnlineUsers.filter(
+    (u) => u.email.toLowerCase() !== myEmail.toLowerCase() && !myContactEmails.has(u.email.toLowerCase())
+  );
+  if (others.length === 0) {
+    const li = document.createElement("li");
+    li.className = "empty-note";
+    li.textContent = "No one else online right now.";
+    onlineUsersListEl.appendChild(li);
+    return;
+  }
+  others.forEach(({ email, name }) => {
+    const li = document.createElement("li");
+    li.className = "contact-item";
+
+    const dot = document.createElement("span");
+    dot.className = "status-dot online";
+    li.appendChild(dot);
+
+    const label = document.createElement("span");
+    label.className = "contact-label";
+    label.textContent = name || email;
+    li.appendChild(label);
+
+    const chatBtn = document.createElement("button");
+    chatBtn.className = "chat-request-btn";
+    chatBtn.textContent = "Chat";
+    chatBtn.title = "Ask permission to start a temporary chat";
+    chatBtn.onclick = () => requestEphemeralChat(email);
+    li.appendChild(chatBtn);
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "add-online-btn";
+    addBtn.textContent = "Add";
+    addBtn.title = "Save as a contact — chat anytime, no permission needed";
+    addBtn.onclick = () => addContactByEmail(email);
+    li.appendChild(addBtn);
+
+    onlineUsersListEl.appendChild(li);
+  });
+}
+
+// We need each online user's sid to send a chat request — the presence
+// broadcast includes email/name; sid lookup happens by asking chat.js's own
+// socket to resolve it via a small server round trip using email as the key.
+// Simplest: request_chat takes an email; server resolves sid itself.
+function requestEphemeralChat(email) {
+  socket.emit("request_chat", { target_email: email.toLowerCase() });
+}
+
+// ===========================================================================
+// EPHEMERAL chat (temporary, permission-based, never stored)
+// ===========================================================================
+socket.on("incoming_request", ({ from_sid, from_name }) => {
+  pendingRequesterSid = from_sid;
+  requestTextEl.textContent = `${from_name} wants to chat with you.`;
+  modalEl.classList.remove("hidden");
+});
+
+acceptBtn.onclick = () => {
+  socket.emit("respond_chat", { accepted: true, requester_sid: pendingRequesterSid });
+  modalEl.classList.add("hidden");
+};
+
+declineBtn.onclick = () => {
+  socket.emit("respond_chat", { accepted: false, requester_sid: pendingRequesterSid });
+  modalEl.classList.add("hidden");
+};
+
+socket.on("chat_declined", () => alert("The other user declined your chat request."));
+socket.on("chat_error", ({ message }) => alert(message));
+
+socket.on("chat_started", ({ with_name }) => {
+  ephemeralPartnerNameEl.textContent = with_name;
+  ephemeralMessagesEl.innerHTML = "";
+  hideAllChatWindows();
+  ephemeralChatWindowEl.classList.remove("hidden");
+});
+
+socket.on("ephemeral_message", ({ text, from }) => {
+  appendEphemeralMessage(`${from}: ${text}`, "theirs");
+});
+
+socket.on("ephemeral_partner_left", () => {
+  appendEphemeralMessage("The other person left the chat.", "system");
+});
+
+ephemeralMessageForm.onsubmit = (e) => {
+  e.preventDefault();
+  const text = ephemeralMessageInput.value.trim();
+  if (!text) return;
+  socket.emit("ephemeral_message", { text });
+  appendEphemeralMessage(`You: ${text}`, "mine");
+  ephemeralMessageInput.value = "";
+};
+
+ephemeralLeaveBtn.onclick = () => {
+  socket.emit("leave_ephemeral_chat");
+  hideAllChatWindows();
+  noChatEl.classList.remove("hidden");
+};
+
+function appendEphemeralMessage(text, cls) {
+  const div = document.createElement("div");
+  div.className = `message ${cls}`;
+  div.textContent = text;
+  ephemeralMessagesEl.appendChild(div);
+  ephemeralMessagesEl.scrollTop = ephemeralMessagesEl.scrollHeight;
+}
+
+// ===========================================================================
+// Presence
+// ===========================================================================
 socket.on("presence_update", ({ email, online }) => {
   const normalized = email.toLowerCase();
   if (online) onlineEmails.add(normalized);
@@ -204,6 +392,11 @@ socket.on("presence_update", ({ email, online }) => {
     if (dot) dot.className = `status-dot ${online ? "online" : "offline"}`;
   }
   updateContactStatusDot();
+});
+
+socket.on("online_users_update", ({ users }) => {
+  latestOnlineUsers = users || [];
+  renderOnlineUsersList();
 });
 
 loadContacts();
@@ -230,11 +423,6 @@ function resetInactivityTimer() {
 });
 resetInactivityTimer();
 
-// Phones often pause background tabs entirely, so the setTimeout above may
-// not fire exactly on time while minimized. To guarantee correctness, we
-// also do an explicit check the moment the app becomes visible again — if
-// 3+ minutes have genuinely passed since the last activity, log out
-// immediately rather than briefly showing the old screen first.
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     const elapsed = Date.now() - lastActivityAt;

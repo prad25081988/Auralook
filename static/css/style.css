@@ -98,13 +98,31 @@ body {
   overflow-y: auto;
 }
 .sidebar h2 { font-size: 13px; text-transform: uppercase; color: #888; margin-top: 0; letter-spacing: 0.03em; }
+.section-gap { margin-top: 20px; }
 .add-contact-form { display: flex; gap: 6px; margin-bottom: 8px; }
 .add-contact-form input { flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; }
 .add-contact-form button { padding: 6px 10px; border: none; background: #4285F4; color: white; border-radius: 6px; cursor: pointer; }
 
 .sidebar ul { list-style: none; padding: 0; margin: 0; }
-.contact-item { display: flex; align-items: center; gap: 8px; padding: 8px 6px; font-size: 13px; border-bottom: 1px solid #f0f0f0; cursor: pointer; word-break: break-all; }
+.contact-item { display: flex; align-items: center; gap: 8px; padding: 8px 6px; font-size: 13px; border-bottom: 1px solid #f0f0f0; }
 .contact-item:hover { background: #f5f6f8; }
+.contact-label { flex: 1; min-width: 0; word-break: break-all; cursor: pointer; }
+.empty-note { color: #999; font-size: 12px; padding: 8px 6px; font-style: italic; }
+
+.remove-contact-btn, .add-online-btn, .chat-request-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.remove-contact-btn { background: #f0f0f0; color: #ea4335; }
+.remove-contact-btn:hover { background: #fdecea; }
+.add-online-btn { background: #4285F4; color: white; }
+.add-online-btn:hover { background: #3367d6; }
+.chat-request-btn { background: #f0f0f0; color: #34a853; }
+.chat-request-btn:hover { background: #e6f4ea; }
 
 .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
 .status-dot.online { background: #34a853; }
@@ -115,6 +133,7 @@ body {
 .hidden { display: none !important; }
 
 #contact-chat-window { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#ephemeral-chat-window { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .chat-header { padding: 12px 20px; background: white; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; font-size: 14px; flex-wrap: wrap; gap: 8px; }
 .chat-header button { padding: 6px 12px; border: none; background: #ea4335; color: white; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .contact-note { font-size: 11px; color: #999; }
@@ -123,14 +142,21 @@ body {
 .message { max-width: 75%; padding: 8px 12px; border-radius: 10px; word-wrap: break-word; font-size: 14px; }
 .message.mine { background: #4285F4; color: white; align-self: flex-end; }
 .message.theirs { background: white; border: 1px solid #e0e0e0; align-self: flex-start; }
+.message.system { color: #999; font-style: italic; align-self: center; font-size: 12px; text-align: center; }
 
 .contact-msg-actions { display: flex; gap: 8px; margin-top: 4px; }
 .contact-msg-actions button { font-size: 11px; padding: 2px 6px; border: none; background: rgba(0,0,0,0.08); color: inherit; border-radius: 4px; cursor: pointer; }
 .contact-msg-actions button:hover { background: rgba(0,0,0,0.18); }
 
-#contact-message-form { display: flex; padding: 12px; background: white; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
-#contact-message-input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; min-width: 0; }
-#contact-message-form button { padding: 10px 16px; border: none; background: #4285F4; color: white; border-radius: 6px; cursor: pointer; }
+#contact-message-form, #ephemeral-message-form { display: flex; padding: 12px; background: white; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
+#contact-message-input, #ephemeral-message-input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; min-width: 0; }
+#contact-message-form button, #ephemeral-message-form button { padding: 10px 16px; border: none; background: #4285F4; color: white; border-radius: 6px; cursor: pointer; }
+
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 100; }
+.modal-box { background: white; padding: 24px; border-radius: 10px; text-align: center; max-width: 320px; width: 100%; }
+.modal-box button { margin: 8px 8px 0; padding: 8px 16px; border: none; border-radius: 6px; cursor: pointer; }
+#accept-btn { background: #34a853; color: white; }
+#decline-btn { background: #ea4335; color: white; }
 
 /* ---------- Mobile: stack sidebar above chat, full width ---------- */
 @media (max-width: 640px) {

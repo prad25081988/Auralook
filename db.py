@@ -57,6 +57,13 @@ def init_db():
                 );
             """)
             cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    email TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                );
+            """)
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id SERIAL PRIMARY KEY,
                     conversation_key TEXT NOT NULL,
@@ -112,22 +119,61 @@ def add_contact(owner_email, contact_email):
 
 
 def list_contacts(owner_email):
-    """Everyone the user explicitly added, PLUS anyone who has ever messaged
-    them (so a message from someone new still shows up as a chat, similar
-    to how WhatsApp surfaces messages from unsaved numbers)."""
+    """Only people the user explicitly added. Returns each contact's own
+    chosen display name (set during their onboarding) alongside their
+    email, so the UI can show a name instead of a raw address — falls back
+    to the email itself if that person hasn't set a name yet (e.g. never
+    logged in)."""
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT contact_email AS email FROM contacts WHERE owner_email = %s
-                UNION
-                SELECT sender_email AS email FROM messages WHERE recipient_email = %s
-                ORDER BY email;
+                SELECT c.contact_email AS email, u.display_name
+                FROM contacts c
+                LEFT JOIN users u ON u.email = c.contact_email
+                WHERE c.owner_email = %s
+                ORDER BY c.contact_email;
                 """,
-                (owner_email.lower(), owner_email.lower()),
+                (owner_email.lower(),),
             )
-            return [row["email"] for row in cur.fetchall()]
+            return [
+                {"email": row["email"], "displayName": row["display_name"] or row["email"]}
+                for row in cur.fetchall()
+            ]
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Users — each person's own chosen display name (set once during
+# onboarding), so it can be looked up and shown even while they're offline.
+# ---------------------------------------------------------------------------
+def upsert_user_name(email, display_name):
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (email, display_name) VALUES (%s, %s)
+                ON CONFLICT (email) DO UPDATE SET display_name = EXCLUDED.display_name, updated_at = NOW();
+                """,
+                (email.lower(), display_name),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def remove_contact(owner_email, contact_email):
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM contacts WHERE owner_email = %s AND contact_email = %s;",
+                (owner_email.lower(), contact_email.lower()),
+            )
+        conn.commit()
     finally:
         conn.close()
 
