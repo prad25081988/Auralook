@@ -25,6 +25,7 @@ const contactMessagesEl = document.getElementById("contact-messages");
 const contactMessageForm = document.getElementById("contact-message-form");
 const contactMessageInput = document.getElementById("contact-message-input");
 const contactCloseBtn = document.getElementById("contact-close-btn");
+const contactClearBtn = document.getElementById("contact-clear-btn");
 
 // --- Ephemeral (temporary, permission-based) elements ---
 const ephemeralChatWindowEl = document.getElementById("ephemeral-chat-window");
@@ -182,6 +183,24 @@ contactCloseBtn.onclick = () => {
   currentContactName = null;
   hideAllChatWindows();
   noChatEl.classList.remove("hidden");
+};
+
+contactClearBtn.onclick = async () => {
+  if (!currentContactEmail) return;
+  if (!confirm("Clear this entire chat from your view? This won't affect the other person's copy.")) return;
+  try {
+    const res = await fetch(`/api/conversation/${encodeURIComponent(currentContactEmail)}/clear-for-me`, {
+      method: "POST",
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+    contactMessagesEl.innerHTML = "";
+  } catch (err) {
+    alert("Could not clear this chat. Please try again.");
+  }
 };
 
 contactMessageForm.onsubmit = async (e) => {
@@ -404,7 +423,7 @@ loadContacts();
 // ===========================================================================
 // AUTO-LOGOUT after 3 minutes of inactivity
 // ===========================================================================
-const INACTIVITY_LIMIT_MS = 3 * 60 * 1000;
+const INACTIVITY_LIMIT_MS = 2 * 60 * 1000;
 let inactivityTimer = null;
 let lastActivityAt = Date.now();
 

@@ -36,7 +36,7 @@ import db
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-app.permanent_session_lifetime = timedelta(minutes=3)
+app.permanent_session_lifetime = timedelta(minutes=2)
 
 socketio = SocketIO(
     app,
@@ -142,8 +142,21 @@ def enter_pin():
         entered = request.form.get("pin", "")
         if entered == ACCESS_PIN:
             session["pin_verified"] = True
+            session.pop("pin_attempts", None)
             return redirect(url_for("index"))
-        error = "Incorrect PIN. Try again."
+
+        # Track failed attempts; after 3, fully log out and require signing
+        # in with Google again from scratch rather than letting someone
+        # keep guessing indefinitely.
+        session["pin_attempts"] = session.get("pin_attempts", 0) + 1
+        if session["pin_attempts"] >= 3:
+            session.clear()
+            return render_template(
+                "login.html",
+                skip_login_enabled=SKIP_GOOGLE_LOGIN,
+                error="Too many incorrect PIN attempts. Please sign in again.",
+            )
+        error = f"Incorrect PIN. Try again. ({session['pin_attempts']}/3 attempts)"
     return render_template("pin.html", error=error)
 
 
@@ -225,6 +238,18 @@ def api_list_contacts():
     for c in contacts:
         c["online"] = c["email"].lower() in online_emails
     return jsonify({"contacts": contacts})
+
+
+@app.route("/api/conversation/<other_email>/clear-for-me", methods=["POST"])
+def api_clear_conversation(other_email):
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    try:
+        db.clear_conversation_for_me(user["email"], other_email)
+    except Exception as e:
+        return jsonify({"error": f"Could not clear chat: {e}"}), 500
+    return jsonify({"ok": True})
 
 
 @app.route("/api/conversation/<other_email>")

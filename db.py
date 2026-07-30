@@ -31,7 +31,7 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 _ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY")
 _fernet = Fernet(_ENCRYPTION_KEY.encode()) if _ENCRYPTION_KEY else None
 
-MAX_MESSAGES_PER_CONVERSATION = 5
+MAX_MESSAGES_PER_CONVERSATION = 3
 
 
 def _get_conn():
@@ -273,6 +273,31 @@ def delete_for_me(message_id, requester_email):
                 cur.execute("UPDATE messages SET deleted_for_recipient = TRUE WHERE id = %s;", (message_id,))
             else:
                 return False
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def clear_conversation_for_me(viewer_email, other_email):
+    """'Clear' button — hides every message in this conversation on the
+    requester's side only, same as tapping 'Delete for me' on each one.
+    The other person's copy is completely unaffected."""
+    conv_key = _conversation_key(viewer_email, other_email)
+    viewer = viewer_email.lower()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE messages SET deleted_for_sender = TRUE "
+                "WHERE conversation_key = %s AND sender_email = %s;",
+                (conv_key, viewer),
+            )
+            cur.execute(
+                "UPDATE messages SET deleted_for_recipient = TRUE "
+                "WHERE conversation_key = %s AND recipient_email = %s;",
+                (conv_key, viewer),
+            )
         conn.commit()
         return True
     finally:

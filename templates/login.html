@@ -15,6 +15,7 @@
 <body class="center-page">
   <div class="card">
     <h1>Auralook</h1>
+    {% if error %}<p class="error-text">{{ error }}</p>{% endif %}
     <a class="google-btn" href="{{ url_for('login') }}">
       Sign in with Google
     </a>
