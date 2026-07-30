@@ -213,15 +213,35 @@ loadContacts();
 // ===========================================================================
 const INACTIVITY_LIMIT_MS = 3 * 60 * 1000;
 let inactivityTimer = null;
+let lastActivityAt = Date.now();
+
+function goToLogin() {
+  window.location.href = "/logout";
+}
 
 function resetInactivityTimer() {
+  lastActivityAt = Date.now();
   if (inactivityTimer) clearTimeout(inactivityTimer);
-  inactivityTimer = setTimeout(() => {
-    window.location.href = "/logout";
-  }, INACTIVITY_LIMIT_MS);
+  inactivityTimer = setTimeout(goToLogin, INACTIVITY_LIMIT_MS);
 }
 
 ["mousemove", "mousedown", "keydown", "touchstart", "scroll"].forEach((evt) => {
   document.addEventListener(evt, resetInactivityTimer, { passive: true });
 });
 resetInactivityTimer();
+
+// Phones often pause background tabs entirely, so the setTimeout above may
+// not fire exactly on time while minimized. To guarantee correctness, we
+// also do an explicit check the moment the app becomes visible again — if
+// 3+ minutes have genuinely passed since the last activity, log out
+// immediately rather than briefly showing the old screen first.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    const elapsed = Date.now() - lastActivityAt;
+    if (elapsed >= INACTIVITY_LIMIT_MS) {
+      goToLogin();
+    } else {
+      resetInactivityTimer();
+    }
+  }
+});
