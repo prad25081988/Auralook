@@ -23,8 +23,14 @@ from authlib.integrations.flask_client import OAuth
 import db
 
 app = Flask(__name__)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # always serve fresh static files — avoids
+# phones/browsers running an old cached chat.js after a deploy, which can
+# look exactly like a logic bug when it's actually just a stale cache
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-app.permanent_session_lifetime = timedelta(minutes=2)
+app.permanent_session_lifetime = timedelta(days=7)  # keeps Google sign-in alive long-term;
+# the 2-minute PIN re-entry is enforced separately, client-side + via /lock,
+# NOT by this cookie expiring — otherwise the two race each other and you'd
+# get bounced all the way back to Google sign-in instead of just the PIN.
 
 socketio = SocketIO(
     app,
