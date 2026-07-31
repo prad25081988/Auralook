@@ -52,10 +52,12 @@ def init_db():
                     id SERIAL PRIMARY KEY,
                     owner_email TEXT NOT NULL,
                     contact_email TEXT NOT NULL,
+                    nickname TEXT,
                     added_at TIMESTAMP DEFAULT NOW(),
                     UNIQUE(owner_email, contact_email)
                 );
             """)
+            cur.execute("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS nickname TEXT;")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     email TEXT PRIMARY KEY,
@@ -104,14 +106,20 @@ def _decrypt(token):
 # ---------------------------------------------------------------------------
 # Contacts
 # ---------------------------------------------------------------------------
-def add_contact(owner_email, contact_email):
+def add_contact(owner_email, contact_email, nickname=None):
+    """The nickname is whatever YOU want to call this person — not their
+    own chosen name. Re-adding the same email updates the nickname if a
+    new one is given."""
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO contacts (owner_email, contact_email) VALUES (%s, %s) "
-                "ON CONFLICT (owner_email, contact_email) DO NOTHING;",
-                (owner_email.lower(), contact_email.lower()),
+                """
+                INSERT INTO contacts (owner_email, contact_email, nickname) VALUES (%s, %s, %s)
+                ON CONFLICT (owner_email, contact_email)
+                DO UPDATE SET nickname = COALESCE(EXCLUDED.nickname, contacts.nickname);
+                """,
+                (owner_email.lower(), contact_email.lower(), nickname),
             )
         conn.commit()
     finally:
@@ -119,26 +127,18 @@ def add_contact(owner_email, contact_email):
 
 
 def list_contacts(owner_email):
-    """Only people the user explicitly added. Returns each contact's own
-    chosen display name (set during their onboarding) alongside their
-    email, so the UI can show a name instead of a raw address — falls back
-    to the email itself if that person hasn't set a name yet (e.g. never
-    logged in)."""
+    """Only people the user explicitly added, with the nickname the owner
+    gave them (falls back to showing the email if somehow no nickname was
+    ever set)."""
     conn = _get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                SELECT c.contact_email AS email, u.display_name
-                FROM contacts c
-                LEFT JOIN users u ON u.email = c.contact_email
-                WHERE c.owner_email = %s
-                ORDER BY c.contact_email;
-                """,
+                "SELECT contact_email AS email, nickname FROM contacts WHERE owner_email = %s ORDER BY contact_email;",
                 (owner_email.lower(),),
             )
             return [
-                {"email": row["email"], "displayName": row["display_name"] or row["email"]}
+                {"email": row["email"], "nickname": row["nickname"] or row["email"]}
                 for row in cur.fetchall()
             ]
     finally:

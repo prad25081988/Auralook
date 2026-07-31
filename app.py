@@ -1,35 +1,23 @@
 """
 Auralook chat app.
 
-ONE unified messaging system: add someone by email, and that becomes a
-single ongoing conversation — whether they're online or not. Messages are
-delivered live instantly if the other person is currently connected, and
-simply wait in storage if they're not; either way it's the exact same chat
-thread, continuing seamlessly once both are online together.
+Contacts-only model: add someone by email and give them a nickname of your
+own choosing (not their own name — whatever YOU want to call them). Once
+added, message them anytime, online or offline, no permission needed.
+People you haven't added are never visible anywhere, even if they're
+currently logged into the app themselves — there's no public "who's
+online" list, by design.
 
-Design notes:
-- Messages are stored server-side, encrypted at rest (the server does hold
-  the decryption key — this is NOT end-to-end encryption). This is what
-  makes a continuous, always-available conversation possible; true E2EE
-  can't support this because it depends on a live key exchange that has no
-  meaning once a session ends.
-- Only the 5 most recent messages per conversation are ever kept.
-- "Delete for me" hides a message only on the requester's side. "Delete for
-  everyone" permanently deletes it, and is only allowed on messages the
-  requester originally sent (matches WhatsApp's rule).
-- "Online" is just a live presence indicator (a green dot next to a
-  contact's name) — it does NOT create or destroy anything. Minimizing the
-  app, a flaky connection, or briefly disconnecting has zero effect on the
-  conversation itself.
-- Also includes: Google login, a shared PIN gate, a custom display name
-  step, and a 3-minute inactivity auto-logout.
+Also includes: Google login, a shared PIN gate (with a 3-strike device
+lockout), a 3-minute inactivity auto-logout, and best-effort detection of
+a full app quit vs. just minimizing.
 """
 
 import os
 import uuid
 from datetime import timedelta
 from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
-from flask_socketio import SocketIO, emit, join_room, leave_room
+from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
 
 import db
@@ -63,17 +51,15 @@ except Exception as e:
     print(f"[startup] Database not ready yet: {e}")
 
 # ---------------------------------------------------------------------------
-# Presence tracking only — purely informational (the little online dot).
-# Never used to gate whether messaging works; that's handled entirely by
-# the persistent contacts system in db.py.
+# Presence — ONLY used to show an online/offline dot next to contacts you've
+# already added. Never exposes who else is using the app.
 # ---------------------------------------------------------------------------
-email_to_sid = {}  # email -> sid, so we know who's currently connected
-online_users_info = {}  # email -> {"name": str, "sid": str} — full presence for the "Online now" discovery list
+email_to_sid = {}  # email -> sid
 
 
 def _require_login():
     user = session.get("user")
-    if not user or not session.get("pin_verified") or not session.get("display_name"):
+    if not user or not session.get("pin_verified"):
         return None
     return user
 
@@ -95,10 +81,9 @@ def index():
         return render_template("login.html", skip_login_enabled=SKIP_GOOGLE_LOGIN)
     if not session.get("pin_verified"):
         return redirect(url_for("enter_pin"))
-    if not session.get("display_name"):
-        return redirect(url_for("set_name"))
     session.permanent = True
-    return render_template("lobby.html", display_name=session["display_name"], my_email=user["email"])
+    my_name = user.get("name") or user["email"]
+    return render_template("lobby.html", my_name=my_name, my_email=user["email"])
 
 
 @app.route("/skip-login")
@@ -145,9 +130,6 @@ def enter_pin():
             session.pop("pin_attempts", None)
             return redirect(url_for("index"))
 
-        # Track failed attempts; after 3, fully log out and require signing
-        # in with Google again from scratch rather than letting someone
-        # keep guessing indefinitely.
         session["pin_attempts"] = session.get("pin_attempts", 0) + 1
         if session["pin_attempts"] >= 3:
             session.clear()
@@ -161,27 +143,6 @@ def enter_pin():
     return render_template("pin.html", error=error)
 
 
-@app.route("/set-name", methods=["GET", "POST"])
-def set_name():
-    if not session.get("user") or not session.get("pin_verified"):
-        return redirect(url_for("index"))
-    error = None
-    if request.method == "POST":
-        name = request.form.get("display_name", "").strip()
-        if not name:
-            error = "Please enter a display name."
-        elif len(name) > 30:
-            error = "Please keep it under 30 characters."
-        else:
-            session["display_name"] = name
-            try:
-                db.upsert_user_name(session["user"]["email"], name)
-            except Exception as e:
-                print(f"[set_name] Could not save display name to users table: {e}")
-            return redirect(url_for("index"))
-    return render_template("set_name.html", error=error)
-
-
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
@@ -189,7 +150,7 @@ def logout():
 
 
 # ---------------------------------------------------------------------------
-# Contacts + messaging (REST API, backed by Postgres) — THE single chat system
+# Contacts + messaging (REST API, backed by Postgres) — the only chat system
 # ---------------------------------------------------------------------------
 @app.route("/api/contacts/add", methods=["POST"])
 def api_add_contact():
@@ -197,14 +158,17 @@ def api_add_contact():
     if not user:
         return jsonify({"error": "Not logged in"}), 401
 
-    contact_email = (request.json or {}).get("email", "").strip().lower()
+    body = request.json or {}
+    contact_email = body.get("email", "").strip().lower()
+    nickname = (body.get("nickname") or "").strip() or None
+
     if not contact_email or "@" not in contact_email:
         return jsonify({"error": "Please enter a valid email address."}), 400
     if contact_email == user["email"].lower():
         return jsonify({"error": "You can't add yourself."}), 400
 
     try:
-        db.add_contact(user["email"], contact_email)
+        db.add_contact(user["email"], contact_email, nickname)
     except Exception as e:
         return jsonify({"error": f"Could not add contact: {e}"}), 500
 
@@ -232,7 +196,7 @@ def api_list_contacts():
     if not user:
         return jsonify({"error": "Not logged in"}), 401
     try:
-        contacts = db.list_contacts(user["email"])  # each: {"email": ..., "displayName": ...}
+        contacts = db.list_contacts(user["email"])  # each: {"email": ..., "nickname": ...}
     except Exception as e:
         return jsonify({"error": f"Could not load contacts: {e}"}), 500
     online_emails = set(email_to_sid.keys())
@@ -282,8 +246,6 @@ def api_send_message():
     except Exception as e:
         return jsonify({"error": f"Could not send message: {e}"}), 500
 
-    # Deliver live instantly if the recipient happens to be connected right
-    # now — purely a nice-to-have; the message is safely stored either way.
     recipient_sid = email_to_sid.get(to_email)
     if recipient_sid:
         socketio.emit(
@@ -328,91 +290,19 @@ def api_delete_for_everyone():
 
 
 # ---------------------------------------------------------------------------
-# EPHEMERAL chat — only used for people who are online but NOT yet added as
-# a contact. Requires the other person to accept a request first, and the
-# chat ends the moment either side disconnects. Nothing here is stored
-# anywhere, ever — this is separate from and unrelated to the persistent
-# contacts system above.
-# ---------------------------------------------------------------------------
-pending_requests = {}   # target_sid -> requester_sid
-ephemeral_rooms = {}    # sid -> room_id
-
-
-@socketio.on("request_chat")
-def on_request_chat(data):
-    target_email = (data.get("target_email") or "").lower()
-    target_sid = email_to_sid.get(target_email)
-    if not target_sid:
-        emit("chat_error", {"message": "That user is no longer online."})
-        return
-    pending_requests[target_sid] = request.sid
-    requester_email = next((e for e, s in email_to_sid.items() if s == request.sid), None)
-    requester_name = online_users_info.get(requester_email, {}).get("name", "Someone")
-    emit("incoming_request", {"from_sid": request.sid, "from_name": requester_name}, room=target_sid)
-
-
-@socketio.on("respond_chat")
-def on_respond_chat(data):
-    accepted = data.get("accepted")
-    requester_sid = data.get("requester_sid")
-    target_sid = request.sid
-    pending_requests.pop(target_sid, None)
-
-    if not accepted:
-        emit("chat_declined", {}, room=requester_sid)
-        return
-
-    if requester_sid not in email_to_sid.values():
-        emit("chat_error", {"message": "The other user disconnected."})
-        return
-
-    room_id = uuid.uuid4().hex
-    join_room(room_id, sid=requester_sid)
-    join_room(room_id, sid=target_sid)
-    ephemeral_rooms[requester_sid] = room_id
-    ephemeral_rooms[target_sid] = room_id
-
-    target_email = next((e for e, s in email_to_sid.items() if s == target_sid), None)
-    requester_email = next((e for e, s in email_to_sid.items() if s == requester_sid), None)
-    emit("chat_started", {"room": room_id, "with_name": online_users_info.get(target_email, {}).get("name", "Someone")}, room=requester_sid)
-    emit("chat_started", {"room": room_id, "with_name": online_users_info.get(requester_email, {}).get("name", "Someone")}, room=target_sid)
-
-
-@socketio.on("ephemeral_message")
-def on_ephemeral_message(data):
-    room_id = ephemeral_rooms.get(request.sid)
-    if not room_id:
-        return
-    sender_email = next((e for e, s in email_to_sid.items() if s == request.sid), None)
-    sender_name = online_users_info.get(sender_email, {}).get("name", "Unknown")
-    emit("ephemeral_message", {"text": data.get("text", ""), "from": sender_name}, room=room_id, include_self=False)
-
-
-@socketio.on("leave_ephemeral_chat")
-def on_leave_ephemeral_chat():
-    room_id = ephemeral_rooms.pop(request.sid, None)
-    if room_id:
-        leave_room(room_id)
-        emit("ephemeral_partner_left", {}, room=room_id)
-
-
-# ---------------------------------------------------------------------------
-# Socket.IO — presence only. No PERSISTENT chat state lives here at all, so
-# minimizing the app / a dropped connection / reconnecting never affects
-# any saved conversation. Used for: the little online dot on saved
-# contacts, the "Online now" discovery list, and (above) the ephemeral
-# permission-based chat for people not yet added.
+# Socket.IO — presence only. Only tells YOUR browser about online/offline
+# status for emails already in YOUR contacts list (enforced client-side by
+# simply never rendering anyone else). No public discovery, no ephemeral
+# chat system — contacts are the only way to message anyone.
 # ---------------------------------------------------------------------------
 @socketio.on("connect")
 def on_connect():
     user = session.get("user")
-    if not user or not session.get("pin_verified") or not session.get("display_name"):
+    if not user or not session.get("pin_verified"):
         return False
     email = user["email"].lower()
     email_to_sid[email] = request.sid
-    online_users_info[email] = {"name": session.get("display_name"), "email": email}
     emit("presence_update", {"email": email, "online": True}, broadcast=True)
-    broadcast_online_users()
 
 
 @socketio.on("disconnect")
@@ -421,24 +311,7 @@ def on_disconnect():
     email = next((e for e, s in email_to_sid.items() if s == sid), None)
     if email:
         email_to_sid.pop(email, None)
-        online_users_info.pop(email, None)
         emit("presence_update", {"email": email, "online": False}, broadcast=True)
-        broadcast_online_users()
-
-    # If they were in an ephemeral chat, end it and tell the other side —
-    # this is the "disappears once offline" behavior for non-contacts.
-    room_id = ephemeral_rooms.pop(sid, None)
-    if room_id:
-        emit("ephemeral_partner_left", {}, room=room_id)
-    pending_requests.pop(sid, None)
-    for target, requester in list(pending_requests.items()):
-        if requester == sid:
-            pending_requests.pop(target, None)
-
-
-def broadcast_online_users():
-    users = list(online_users_info.values())
-    emit("online_users_update", {"users": users}, broadcast=True)
 
 
 if __name__ == "__main__":
