@@ -16,7 +16,7 @@ a full app quit vs. just minimizing.
 import os
 import uuid
 from datetime import timedelta
-from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
+from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify, make_response
 from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
 
@@ -101,7 +101,13 @@ def index():
         return redirect(url_for("enter_pin"))
     session.permanent = True
     my_name = "Guest"  # topbar always shows "Guest" regardless of the real Google account name
-    return render_template("lobby.html", my_name=my_name, my_email=user["email"])
+    response = make_response(render_template("lobby.html", my_name=my_name, my_email=user["email"]))
+    # Critical: without this, Chrome/Safari can silently restore this page
+    # from "back/forward cache" instead of truly reloading it — which
+    # skips our inline lock-check script entirely, since bfcache resumes a
+    # frozen page rather than re-running any load-time scripts.
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/skip-login")

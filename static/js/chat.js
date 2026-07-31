@@ -337,3 +337,18 @@ document.addEventListener("visibilitychange", () => {
 // killing it, where no fresh page load happens at all). Both read the same
 // localStorage timestamp, so they stay in agreement regardless of which
 // scenario actually occurred.
+
+// Defense-in-depth: if the browser ever restores this page from
+// "back/forward cache" (bfcache) despite the no-store header on the
+// server response, "pageshow" still fires with event.persisted = true —
+// unlike a plain script tag, which would NOT re-run in that case. Re-check
+// here too, so there's no gap even in that edge case.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || "0", 10);
+    const elapsed = Date.now() - lastActive;
+    if (elapsed >= INACTIVITY_LIMIT_MS) {
+      goToLock();
+    }
+  }
+});
