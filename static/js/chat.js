@@ -8,6 +8,7 @@ const myEmail = document.body.dataset.myEmail;
 
 const contactsListEl = document.getElementById("contacts-list");
 const addContactForm = document.getElementById("add-contact-form");
+const addContactToggleBtn = document.getElementById("add-contact-toggle-btn");
 const addContactEmailInput = document.getElementById("add-contact-email");
 const addContactNicknameInput = document.getElementById("add-contact-nickname");
 const addContactError = document.getElementById("add-contact-error");
@@ -81,6 +82,14 @@ function renderContactsList(contacts) {
   });
 }
 
+addContactToggleBtn.onclick = () => {
+  addContactForm.classList.toggle("hidden");
+  addContactError.classList.add("hidden");
+  if (!addContactForm.classList.contains("hidden")) {
+    addContactEmailInput.focus();
+  }
+};
+
 addContactForm.onsubmit = async (e) => {
   e.preventDefault();
   const email = addContactEmailInput.value.trim().toLowerCase();
@@ -100,6 +109,7 @@ addContactForm.onsubmit = async (e) => {
     }
     addContactEmailInput.value = "";
     addContactNicknameInput.value = "";
+    addContactForm.classList.add("hidden"); // fold the form back away after a successful add
     loadContacts();
   } catch (err) {
     addContactError.textContent = "Could not add contact. Please try again.";

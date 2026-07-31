@@ -33,7 +33,19 @@ socketio = SocketIO(
     max_http_buffer_size=22 * 1024 * 1024,
 )
 
-ACCESS_PIN = os.environ.get("ACCESS_PIN", "bp")
+ACCESS_PIN = os.environ.get("ACCESS_PIN")
+if not ACCESS_PIN:
+    # No fallback to a known/shared value on purpose — if ACCESS_PIN isn't
+    # set in the environment, generate a random one at startup instead.
+    # Nobody (including you) will know it without setting ACCESS_PIN
+    # explicitly, which fails safe rather than silently using an old PIN
+    # that may have been shared or exposed elsewhere.
+    ACCESS_PIN = uuid.uuid4().hex[:8]
+    print(
+        "[startup] WARNING: ACCESS_PIN is not set. Generated a random one "
+        "for this run only — set ACCESS_PIN in your environment variables "
+        "so the PIN is something you actually know."
+    )
 SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true"
 
 oauth = OAuth(app)

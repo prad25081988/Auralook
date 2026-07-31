@@ -99,7 +99,20 @@ body {
 }
 .sidebar h2 { font-size: 13px; text-transform: uppercase; color: #888; margin-top: 0; letter-spacing: 0.03em; }
 
-.add-contact-form { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.add-toggle-btn {
+  width: 100%;
+  padding: 8px;
+  border: 1px dashed #4285F4;
+  background: white;
+  color: #4285F4;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+.add-toggle-btn:hover { background: #eef4fe; }
+
+.add-contact-form { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .add-contact-form input { flex: 1 1 100%; min-width: 0; padding: 6px 8px; border-radius: 6px; border: 1px solid #ccc; font-size: 13px; }
 .add-contact-form button { padding: 6px 14px; border: none; background: #4285F4; color: white; border-radius: 6px; cursor: pointer; margin-left: auto; }
 

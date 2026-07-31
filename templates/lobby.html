@@ -22,10 +22,11 @@
     <div class="layout">
       <aside class="sidebar">
         <h2>Chats</h2>
-        <form id="add-contact-form" class="add-contact-form">
+        <button id="add-contact-toggle-btn" class="add-toggle-btn" title="Add someone new">+ Add</button>
+        <form id="add-contact-form" class="add-contact-form hidden">
           <input id="add-contact-email" type="email" placeholder="Email" required />
           <input id="add-contact-nickname" type="text" placeholder="Name to call them" required />
-          <button type="submit">+</button>
+          <button type="submit">Add</button>
         </form>
         <p id="add-contact-error" class="error-text hidden"></p>
         <ul id="contacts-list"></ul>
