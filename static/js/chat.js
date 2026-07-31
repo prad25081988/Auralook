@@ -109,7 +109,7 @@ addContactForm.onsubmit = async (e) => {
     }
     addContactEmailInput.value = "";
     addContactNicknameInput.value = "";
-    addContactForm.classList.add("hidden"); // fold the form back away after a successful add
+    addContactForm.classList.add("hidden");
     loadContacts();
   } catch (err) {
     addContactError.textContent = "Could not add contact. Please try again.";
@@ -244,8 +244,6 @@ async function deleteContactMessage(id, endpoint, el) {
 socket.on("contact_message_received", (m) => {
   if (currentContactEmail && m.from.toLowerCase() === currentContactEmail.toLowerCase()) {
     appendContactMessage(m);
-    // This chat is already open, so mark it seen immediately instead of
-    // waiting for the next time the conversation is opened.
     socket.emit("mark_seen", { other_email: currentContactEmail });
   }
 });
@@ -255,8 +253,6 @@ socket.on("contact_message_deleted", ({ id }) => {
   if (el) el.remove();
 });
 
-// The sender gets told live when their sent messages were just seen —
-// flip those ticks from grey to blue right away.
 socket.on("messages_seen", ({ ids }) => {
   (ids || []).forEach((id) => {
     const tick = contactMessagesEl.querySelector(`[data-tick-for="${id}"]`);
@@ -268,10 +264,6 @@ socket.on("messages_seen", ({ ids }) => {
   });
 });
 
-// Presence — only ever shown for people already in your Chats list. The
-// server broadcasts this for everyone technically, but we simply never
-// render anyone who isn't in myContacts, so no one else's status is ever
-// visible in this UI.
 socket.on("presence_update", ({ email, online }) => {
   const normalized = email.toLowerCase();
   if (online) onlineEmails.add(normalized);
@@ -291,8 +283,8 @@ loadContacts();
 // AUTO-LOGOUT after 2 minutes of inactivity
 // ===========================================================================
 const INACTIVITY_LIMIT_MS = 2 * 60 * 1000;
-const LAST_ACTIVE_KEY = "auralook_last_active";
 let inactivityTimer = null;
+let lastActivityAt = Date.now();
 
 function goToLock() {
   // Idle timeout and app-quit only require re-entering the PIN — the
@@ -302,10 +294,7 @@ function goToLock() {
 }
 
 function resetInactivityTimer() {
-  // localStorage (not a plain JS variable) so this timestamp survives
-  // even if Android fully kills and restarts the app process — the head
-  // script in lobby.html reads this same key on the next page load.
-  localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now()));
+  lastActivityAt = Date.now();
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = setTimeout(goToLock, INACTIVITY_LIMIT_MS);
 }
@@ -317,50 +306,15 @@ resetInactivityTimer();
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    // Ask the server directly whether it's still unlocked, rather than
-    // guessing from a client-side timestamp. This works even if Android
-    // just resumed an already-loaded page from memory without making any
-    // new network request on its own — this fetch call itself becomes
-    // that first request, and the server's own idle timer (tracked via
-    // real request timestamps, not anything client-side) gives the
-    // authoritative answer.
-    fetch("/api/session-check")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.locked) {
-          goToLock();
-        } else {
-          resetInactivityTimer();
-        }
-      })
-      .catch(() => {
-        // If even this check fails (e.g. no network yet), fall back to
-        // the local timestamp as a reasonable best guess.
-        const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || "0", 10);
-        if (Date.now() - lastActive >= INACTIVITY_LIMIT_MS) goToLock();
-      });
-  }
-});
-
-// Note: the check for "has it been 2+ minutes since I was last active" runs
-// twice, on purpose: once instantly in lobby.html's <head> (covers a full
-// app kill + restart, before any content renders), and again here via
-// visibilitychange (covers Android just pausing the process without fully
-// killing it, where no fresh page load happens at all). Both read the same
-// localStorage timestamp, so they stay in agreement regardless of which
-// scenario actually occurred.
-
-// Defense-in-depth: if the browser ever restores this page from
-// "back/forward cache" (bfcache) despite the no-store header on the
-// server response, "pageshow" still fires with event.persisted = true —
-// unlike a plain script tag, which would NOT re-run in that case. Re-check
-// here too, so there's no gap even in that edge case.
-window.addEventListener("pageshow", (event) => {
-  if (event.persisted) {
-    const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || "0", 10);
-    const elapsed = Date.now() - lastActive;
+    const elapsed = Date.now() - lastActivityAt;
     if (elapsed >= INACTIVITY_LIMIT_MS) {
       goToLock();
+    } else {
+      resetInactivityTimer();
     }
   }
 });
+
+// Note: quit-detection (full app close vs. minimize) runs as an inline
+// script in lobby.html's <head>, so it executes instantly before any page
+// content renders — see there for the actual check.

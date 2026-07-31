@@ -5,24 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Auralook</title>
   <script>
-    // Runs synchronously, before anything below renders — so if it needs
-    // to redirect, it does so before any chat content is ever shown.
-    //
-    // This checks REAL ELAPSED TIME using localStorage (not sessionStorage)
-    // on purpose: localStorage survives both simple backgrounding AND a
-    // full app kill/restart, so it doesn't matter whether Android decided
-    // to preserve or destroy the app's process while it was closed — we
-    // just measure how long it's actually been since the last activity,
-    // which gives consistent behavior either way.
     (function () {
-      var INACTIVITY_LIMIT_MS = 2 * 60 * 1000;
-      var lastActive = localStorage.getItem("auralook_last_active");
-      var now = Date.now();
-      if (lastActive && now - parseInt(lastActive, 10) >= INACTIVITY_LIMIT_MS) {
+      var alreadyActive = sessionStorage.getItem("auralook_ctx_active") === "true";
+      sessionStorage.setItem("auralook_ctx_active", "true");
+      if (!alreadyActive) {
         window.location.replace("/lock");
-        return;
       }
-      localStorage.setItem("auralook_last_active", String(now));
     })();
   </script>
   <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}" />
@@ -78,7 +66,7 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
-  <script src="{{ url_for('static', filename='js/chat.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
   <script>
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js");
