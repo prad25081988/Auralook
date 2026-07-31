@@ -198,7 +198,7 @@ function appendContactMessage(m) {
   if (m.isMine) {
     const tick = document.createElement("span");
     tick.className = `seen-tick ${m.seen ? "seen" : "unseen"}`;
-    tick.textContent = " ✓";
+    tick.textContent = m.seen ? " ✓✓" : " ✓";
     tick.dataset.tickFor = m.id;
     div.appendChild(tick);
   }
@@ -263,6 +263,7 @@ socket.on("messages_seen", ({ ids }) => {
     if (tick) {
       tick.classList.remove("unseen");
       tick.classList.add("seen");
+      tick.textContent = " ✓✓";
     }
   });
 });
@@ -322,16 +323,8 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// ===========================================================================
-// QUIT DETECTION — see app.py/db.py comments for the full explanation.
-// sessionStorage is guaranteed by the browser to be wiped the moment this
-// browsing context is truly destroyed (full app quit), unlike events that
-// require JS to run at the moment of the kill.
-// ===========================================================================
-(function () {
-  const alreadyActive = sessionStorage.getItem("auralook_ctx_active") === "true";
-  sessionStorage.setItem("auralook_ctx_active", "true");
-  if (!alreadyActive) {
-    goToLock();
-  }
-})();
+// Note: quit-detection (full app close vs. minimize) now runs as an inline
+// script in lobby.html's <head>, so it executes instantly before any page
+// content renders — see there for the actual check. It used to live here,
+// but running it this late meant the chat screen could flash briefly
+// before redirecting.

@@ -157,8 +157,8 @@ body {
 .contact-msg-actions button:hover { background: rgba(0,0,0,0.18); }
 
 .seen-tick { font-size: 12px; }
-.seen-tick.unseen { color: rgba(255,255,255,0.6); }
-.seen-tick.seen { color: #a7d7ff; font-weight: bold; }
+.seen-tick.unseen { color: rgba(255,255,255,0.65); }
+.seen-tick.seen { color: #ffffff; font-weight: bold; }
 
 #contact-message-form { display: flex; padding: 12px; background: white; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
 #contact-message-input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; min-width: 0; }
