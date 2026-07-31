@@ -16,6 +16,7 @@ a full app quit vs. just minimizing.
 import os
 import uuid
 from datetime import timedelta
+import time
 from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify, make_response
 from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
@@ -73,6 +74,25 @@ except Exception as e:
 # already added. Never exposes who else is using the app.
 # ---------------------------------------------------------------------------
 email_to_sid = {}  # email -> sid
+
+IDLE_LOCK_SECONDS = 120  # 2 minutes - matches the desired idle timeout
+
+
+@app.before_request
+def enforce_idle_lock():
+    """Runs on every single real request the browser makes, server-side —
+    completely immune to bfcache, localStorage quirks, or anything else
+    client-side, since cookies are always sent fresh with every actual
+    HTTP request regardless of any browser caching behavior. This is what
+    correctly catches 'app was quit and reopened after 2+ minutes', no
+    matter what the browser/OS did with the page in between.
+    """
+    if session.get("user") and session.get("pin_verified"):
+        last_seen = session.get("last_seen")
+        now_ts = time.time()
+        if last_seen is not None and (now_ts - last_seen) > IDLE_LOCK_SECONDS:
+            session["pin_verified"] = False
+        session["last_seen"] = now_ts
 
 
 def _require_login():
@@ -223,6 +243,20 @@ def api_remove_contact():
     except Exception as e:
         return jsonify({"error": f"Could not remove contact: {e}"}), 500
     return jsonify({"ok": True})
+
+
+@app.route("/api/session-check")
+def api_session_check():
+    """Lightweight endpoint the client calls whenever the app becomes
+    visible again (foregrounded) — this doesn't rely on a fresh page load
+    happening at all, which matters because some Android/PWA setups just
+    resume an already-loaded page from memory without making any new
+    network request. This forces an explicit check against the server's
+    authoritative, already-tracked idle timer (see enforce_idle_lock
+    above) regardless of what the browser did with the page in between.
+    """
+    locked = not (session.get("user") and session.get("pin_verified"))
+    return jsonify({"locked": locked})
 
 
 @app.route("/api/contacts/list")

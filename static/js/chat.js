@@ -317,16 +317,28 @@ resetInactivityTimer();
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    // Covers the case where Android kept the page alive in memory the
-    // whole time (no reload happened, so the head-script check never ran)
-    // — re-check the persisted timestamp here too, for the same reason.
-    const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || "0", 10);
-    const elapsed = Date.now() - lastActive;
-    if (elapsed >= INACTIVITY_LIMIT_MS) {
-      goToLock();
-    } else {
-      resetInactivityTimer();
-    }
+    // Ask the server directly whether it's still unlocked, rather than
+    // guessing from a client-side timestamp. This works even if Android
+    // just resumed an already-loaded page from memory without making any
+    // new network request on its own — this fetch call itself becomes
+    // that first request, and the server's own idle timer (tracked via
+    // real request timestamps, not anything client-side) gives the
+    // authoritative answer.
+    fetch("/api/session-check")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.locked) {
+          goToLock();
+        } else {
+          resetInactivityTimer();
+        }
+      })
+      .catch(() => {
+        // If even this check fails (e.g. no network yet), fall back to
+        // the local timestamp as a reasonable best guess.
+        const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || "0", 10);
+        if (Date.now() - lastActive >= INACTIVITY_LIMIT_MS) goToLock();
+      });
   }
 });
 
