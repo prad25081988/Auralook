@@ -94,7 +94,7 @@ def index():
     if not session.get("pin_verified"):
         return redirect(url_for("enter_pin"))
     session.permanent = True
-    my_name = user.get("name") or user["email"]
+    my_name = "Guest"  # topbar always shows "Guest" regardless of the real Google account name
     return render_template("lobby.html", my_name=my_name, my_email=user["email"])
 
 
@@ -158,6 +158,17 @@ def enter_pin():
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
+    return redirect(url_for("index"))
+
+
+@app.route("/lock", methods=["GET", "POST"])
+def lock():
+    """Used for idle-timeout and app-quit — only requires the PIN again,
+    keeps the Google sign-in itself intact. A full /logout (only triggered
+    by the manual Logout button) is the only thing that requires signing
+    in with Google again from scratch."""
+    session["pin_verified"] = False
+    session.pop("pin_attempts", None)
     return redirect(url_for("index"))
 
 
@@ -236,8 +247,17 @@ def api_get_conversation(other_email):
         return jsonify({"error": "Not logged in"}), 401
     try:
         messages = db.get_conversation(user["email"], other_email)
+        newly_seen_ids = db.mark_conversation_seen(user["email"], other_email)
     except Exception as e:
         return jsonify({"error": f"Could not load conversation: {e}"}), 500
+
+    # Tell the original sender live (if they're online) that these
+    # messages were just seen, so their tick can flip to blue immediately.
+    if newly_seen_ids:
+        sender_sid = email_to_sid.get(other_email.lower())
+        if sender_sid:
+            socketio.emit("messages_seen", {"ids": newly_seen_ids}, room=sender_sid)
+
     return jsonify({"messages": messages})
 
 
@@ -324,6 +344,24 @@ def on_disconnect():
     if email:
         email_to_sid.pop(email, None)
         emit("presence_update", {"email": email, "online": False}, broadcast=True)
+
+
+@socketio.on("mark_seen")
+def on_mark_seen(data):
+    """Client calls this when a message arrives live while that exact chat
+    is already open, so it gets marked seen immediately rather than
+    waiting for the next time the conversation is opened."""
+    user = session.get("user")
+    if not user or not session.get("pin_verified"):
+        return
+    other_email = (data.get("other_email") or "").strip().lower()
+    if not other_email:
+        return
+    newly_seen_ids = db.mark_conversation_seen(user["email"], other_email)
+    if newly_seen_ids:
+        sender_sid = email_to_sid.get(other_email)
+        if sender_sid:
+            emit("messages_seen", {"ids": newly_seen_ids}, room=sender_sid)
 
 
 if __name__ == "__main__":

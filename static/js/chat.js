@@ -195,6 +195,14 @@ function appendContactMessage(m) {
   div.dataset.messageId = m.id;
   div.textContent = `${m.isMine ? "You" : currentContactName || m.from}: ${m.text}`;
 
+  if (m.isMine) {
+    const tick = document.createElement("span");
+    tick.className = `seen-tick ${m.seen ? "seen" : "unseen"}`;
+    tick.textContent = " ✓";
+    tick.dataset.tickFor = m.id;
+    div.appendChild(tick);
+  }
+
   const actions = document.createElement("div");
   actions.className = "contact-msg-actions";
 
@@ -236,12 +244,27 @@ async function deleteContactMessage(id, endpoint, el) {
 socket.on("contact_message_received", (m) => {
   if (currentContactEmail && m.from.toLowerCase() === currentContactEmail.toLowerCase()) {
     appendContactMessage(m);
+    // This chat is already open, so mark it seen immediately instead of
+    // waiting for the next time the conversation is opened.
+    socket.emit("mark_seen", { other_email: currentContactEmail });
   }
 });
 
 socket.on("contact_message_deleted", ({ id }) => {
   const el = contactMessagesEl.querySelector(`[data-message-id="${id}"]`);
   if (el) el.remove();
+});
+
+// The sender gets told live when their sent messages were just seen —
+// flip those ticks from grey to blue right away.
+socket.on("messages_seen", ({ ids }) => {
+  (ids || []).forEach((id) => {
+    const tick = contactMessagesEl.querySelector(`[data-tick-for="${id}"]`);
+    if (tick) {
+      tick.classList.remove("unseen");
+      tick.classList.add("seen");
+    }
+  });
 });
 
 // Presence — only ever shown for people already in your Chats list. The
@@ -270,14 +293,17 @@ const INACTIVITY_LIMIT_MS = 2 * 60 * 1000;
 let inactivityTimer = null;
 let lastActivityAt = Date.now();
 
-function goToLogin() {
-  window.location.href = "/logout";
+function goToLock() {
+  // Idle timeout and app-quit only require re-entering the PIN — the
+  // Google sign-in itself stays intact. Only the manual Logout button
+  // does a full session clear (see the "Logout" link's href).
+  window.location.href = "/lock";
 }
 
 function resetInactivityTimer() {
   lastActivityAt = Date.now();
   if (inactivityTimer) clearTimeout(inactivityTimer);
-  inactivityTimer = setTimeout(goToLogin, INACTIVITY_LIMIT_MS);
+  inactivityTimer = setTimeout(goToLock, INACTIVITY_LIMIT_MS);
 }
 
 ["mousemove", "mousedown", "keydown", "touchstart", "scroll"].forEach((evt) => {
@@ -289,7 +315,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     const elapsed = Date.now() - lastActivityAt;
     if (elapsed >= INACTIVITY_LIMIT_MS) {
-      goToLogin();
+      goToLock();
     } else {
       resetInactivityTimer();
     }
@@ -306,6 +332,6 @@ document.addEventListener("visibilitychange", () => {
   const alreadyActive = sessionStorage.getItem("auralook_ctx_active") === "true";
   sessionStorage.setItem("auralook_ctx_active", "true");
   if (!alreadyActive) {
-    goToLogin();
+    goToLock();
   }
 })();

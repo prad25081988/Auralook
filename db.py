@@ -74,9 +74,11 @@ def init_db():
                     ciphertext TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW(),
                     deleted_for_sender BOOLEAN DEFAULT FALSE,
-                    deleted_for_recipient BOOLEAN DEFAULT FALSE
+                    deleted_for_recipient BOOLEAN DEFAULT FALSE,
+                    seen BOOLEAN DEFAULT FALSE
                 );
             """)
+            cur.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS seen BOOLEAN DEFAULT FALSE;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_conv_key ON messages(conversation_key);")
         conn.commit()
     finally:
@@ -217,8 +219,9 @@ def send_message(sender_email, recipient_email, text):
 
 
 def get_conversation(viewer_email, other_email):
-    """Last up-to-5 messages between two people, decrypted, with deleted-for-me
-    entries filtered out for the person viewing them."""
+    """Last up-to-3 messages between two people, decrypted, with deleted-for-me
+    entries filtered out for the person viewing them. Includes 'seen' status
+    for each message so the sender's side can show a read tick."""
     conv_key = _conversation_key(viewer_email, other_email)
     conn = _get_conn()
     try:
@@ -226,7 +229,7 @@ def get_conversation(viewer_email, other_email):
             cur.execute(
                 """
                 SELECT id, sender_email, recipient_email, ciphertext, created_at,
-                       deleted_for_sender, deleted_for_recipient
+                       deleted_for_sender, deleted_for_recipient, seen
                 FROM messages
                 WHERE conversation_key = %s
                 ORDER BY created_at ASC
@@ -250,8 +253,34 @@ def get_conversation(viewer_email, other_email):
                 "isMine": is_sender,
                 "text": _decrypt(row["ciphertext"]),
                 "createdAt": row["created_at"].isoformat(),
+                "seen": row["seen"],
             })
         return result
+    finally:
+        conn.close()
+
+
+def mark_conversation_seen(viewer_email, other_email):
+    """Call this when the viewer opens/looks at a conversation — marks any
+    messages that were sent TO them as seen. Returns the list of message IDs
+    that were just newly marked, so the sender can be notified live to flip
+    their tick to blue."""
+    conv_key = _conversation_key(viewer_email, other_email)
+    viewer = viewer_email.lower()
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE messages SET seen = TRUE
+                WHERE conversation_key = %s AND recipient_email = %s AND seen = FALSE
+                RETURNING id;
+                """,
+                (conv_key, viewer),
+            )
+            newly_seen_ids = [row["id"] for row in cur.fetchall()]
+        conn.commit()
+        return newly_seen_ids
     finally:
         conn.close()
 
