@@ -21,7 +21,11 @@
     </form>
   </div>
   <script>
-    sessionStorage.setItem("auralook_ctx_active", "true");
+    // Refresh the activity timestamp here too — otherwise, taking a while
+    // to type the PIN could make lobby.html think you were idle the whole
+    // time and immediately bounce you back to /lock right after correctly
+    // entering it.
+    localStorage.setItem("auralook_last_active", String(Date.now()));
   </script>
 </body>
 </html>

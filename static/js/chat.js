@@ -291,8 +291,8 @@ loadContacts();
 // AUTO-LOGOUT after 2 minutes of inactivity
 // ===========================================================================
 const INACTIVITY_LIMIT_MS = 2 * 60 * 1000;
+const LAST_ACTIVE_KEY = "auralook_last_active";
 let inactivityTimer = null;
-let lastActivityAt = Date.now();
 
 function goToLock() {
   // Idle timeout and app-quit only require re-entering the PIN — the
@@ -302,7 +302,10 @@ function goToLock() {
 }
 
 function resetInactivityTimer() {
-  lastActivityAt = Date.now();
+  // localStorage (not a plain JS variable) so this timestamp survives
+  // even if Android fully kills and restarts the app process — the head
+  // script in lobby.html reads this same key on the next page load.
+  localStorage.setItem(LAST_ACTIVE_KEY, String(Date.now()));
   if (inactivityTimer) clearTimeout(inactivityTimer);
   inactivityTimer = setTimeout(goToLock, INACTIVITY_LIMIT_MS);
 }
@@ -314,7 +317,11 @@ resetInactivityTimer();
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    const elapsed = Date.now() - lastActivityAt;
+    // Covers the case where Android kept the page alive in memory the
+    // whole time (no reload happened, so the head-script check never ran)
+    // — re-check the persisted timestamp here too, for the same reason.
+    const lastActive = parseInt(localStorage.getItem(LAST_ACTIVE_KEY) || "0", 10);
+    const elapsed = Date.now() - lastActive;
     if (elapsed >= INACTIVITY_LIMIT_MS) {
       goToLock();
     } else {
@@ -323,8 +330,10 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-// Note: quit-detection (full app close vs. minimize) now runs as an inline
-// script in lobby.html's <head>, so it executes instantly before any page
-// content renders — see there for the actual check. It used to live here,
-// but running it this late meant the chat screen could flash briefly
-// before redirecting.
+// Note: the check for "has it been 2+ minutes since I was last active" runs
+// twice, on purpose: once instantly in lobby.html's <head> (covers a full
+// app kill + restart, before any content renders), and again here via
+// visibilitychange (covers Android just pausing the process without fully
+// killing it, where no fresh page load happens at all). Both read the same
+// localStorage timestamp, so they stay in agreement regardless of which
+// scenario actually occurred.
