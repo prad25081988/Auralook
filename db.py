@@ -72,7 +72,7 @@ def init_db():
                     sender_email TEXT NOT NULL,
                     recipient_email TEXT NOT NULL,
                     ciphertext TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT NOW(),
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
                     deleted_for_sender BOOLEAN DEFAULT FALSE,
                     deleted_for_recipient BOOLEAN DEFAULT FALSE,
                     seen BOOLEAN DEFAULT FALSE
@@ -83,6 +83,28 @@ def init_db():
         conn.commit()
     finally:
         conn.close()
+
+    # Separate step, its own connection: migrate any existing created_at
+    # column from plain TIMESTAMP to TIMESTAMPTZ. Plain TIMESTAMP has no
+    # timezone marker at all, so when it's sent to the browser and parsed
+    # by JavaScript, it gets silently misread as if it were already in the
+    # browser's local time instead of UTC — throwing every displayed time
+    # off by exactly your timezone offset. TIMESTAMPTZ fixes this at the
+    # source by storing an unambiguous, timezone-aware instant. Wrapped in
+    # its own try/except since this only needs to run once; safe to call
+    # repeatedly afterward (a no-op if already migrated).
+    conn2 = _get_conn()
+    try:
+        with conn2.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE messages ALTER COLUMN created_at TYPE TIMESTAMPTZ "
+                "USING created_at AT TIME ZONE 'UTC';"
+            )
+        conn2.commit()
+    except Exception as e:
+        print(f"[init_db] created_at timezone migration skipped (likely already done): {e}")
+    finally:
+        conn2.close()
 
 
 def _conversation_key(email_a, email_b):
