@@ -26,6 +26,7 @@ const contactClearBtn = document.getElementById("contact-clear-btn");
 let currentContactEmail = null;
 let currentContactName = null;
 let onlineEmails = new Set();
+let lastRenderedDateLabel = null; // tracks the last date-separator shown, so we only insert a new one when the day actually changes
 
 async function loadContacts() {
   try {
@@ -63,7 +64,7 @@ function renderContactsList(contacts) {
     removeBtn.textContent = "Remove";
     removeBtn.onclick = async (e) => {
       e.stopPropagation();
-      if (!confirm(`Remove ${nickname || email} from your chats?`)) return;
+      if (!confirm(`Remove ${nickname || email} from your list?`)) return;
       try {
         await fetch("/api/contacts/remove", {
           method: "POST",
@@ -122,6 +123,7 @@ async function openContactChat(email, name) {
   currentContactName = name;
   contactPartnerNameEl.textContent = name;
   updateContactStatusDot();
+  lastRenderedDateLabel = null; // reset date-separator tracking for this conversation
 
   noChatEl.classList.add("hidden");
   contactChatWindowEl.classList.remove("hidden");
@@ -163,7 +165,7 @@ contactClearBtn.onclick = async () => {
     }
     contactMessagesEl.innerHTML = "";
   } catch (err) {
-    alert("Could not clear this chat. Please try again.");
+    alert("Could not clear this. Please try again.");
   }
 };
 
@@ -189,11 +191,42 @@ contactMessageForm.onsubmit = async (e) => {
   }
 };
 
+function formatDateLabel(date) {
+  const now = new Date();
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (date.toDateString() === now.toDateString()) return "Today";
+  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+function formatTimeLabel(date) {
+  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function appendDateSeparatorIfNeeded(date) {
+  const label = formatDateLabel(date);
+  if (label === lastRenderedDateLabel) return;
+  lastRenderedDateLabel = label;
+  const sep = document.createElement("div");
+  sep.className = "date-separator";
+  sep.textContent = label;
+  contactMessagesEl.appendChild(sep);
+}
+
 function appendContactMessage(m) {
+  const msgDate = m.createdAt ? new Date(m.createdAt) : new Date();
+  appendDateSeparatorIfNeeded(msgDate);
+
   const div = document.createElement("div");
   div.className = `message ${m.isMine ? "mine" : "theirs"}`;
   div.dataset.messageId = m.id;
   div.textContent = `${m.isMine ? "You" : currentContactName || m.from}: ${m.text}`;
+
+  const timeLabel = document.createElement("span");
+  timeLabel.className = "msg-time";
+  timeLabel.textContent = ` ${formatTimeLabel(msgDate)}`;
+  div.appendChild(timeLabel);
 
   if (m.isMine) {
     const tick = document.createElement("span");

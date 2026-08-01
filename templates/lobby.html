@@ -30,7 +30,6 @@
 
     <div class="layout">
       <aside class="sidebar">
-        <h2>Chats</h2>
         <button id="add-contact-toggle-btn" class="add-toggle-btn" title="Add someone new">+ Add</button>
         <form id="add-contact-form" class="add-contact-form hidden">
           <input id="add-contact-email" type="email" placeholder="Email" required />
@@ -43,7 +42,7 @@
 
       <main class="chat-area">
         <div id="no-chat" class="placeholder">
-          Add someone by email and give them a name — chat anytime, online or offline.
+          Add someone by email and give them a name to get started.
         </div>
 
         <div id="contact-chat-window" class="hidden">
@@ -52,7 +51,7 @@
               <span id="contact-status-dot" class="status-dot offline"></span>
               <span id="contact-partner-name"></span>
             </span>
-            <button id="contact-clear-btn" title="Clear this chat (delete for me, all messages)">Clear</button>
+            <button id="contact-clear-btn" title="Clear all messages (only from your view)">Clear</button>
             <button id="contact-close-btn">Close</button>
           </div>
           <div id="contact-messages" class="messages"></div>

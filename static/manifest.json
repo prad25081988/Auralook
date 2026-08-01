@@ -1,7 +1,7 @@
 {
   "name": "Auralook",
   "short_name": "Auralook",
-  "description": "Live-only encrypted chat — nothing is ever saved.",
+  "description": "A private, secure personal space.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
