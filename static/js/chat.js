@@ -191,17 +191,27 @@ contactMessageForm.onsubmit = async (e) => {
   }
 };
 
+const DISPLAY_TIMEZONE = "Asia/Kolkata"; // always show India time, regardless of device settings
+
+// Formats a date as YYYY-MM-DD *in IST specifically*, used only to compare
+// whether two moments fall on the same calendar day in India — comparing
+// raw Date objects directly can give the wrong day if the device itself is
+// set to a different timezone.
+function istDateKey(date) {
+  return date.toLocaleDateString("en-CA", { timeZone: DISPLAY_TIMEZONE });
+}
+
 function formatDateLabel(date) {
   const now = new Date();
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  if (date.toDateString() === now.toDateString()) return "Today";
-  if (date.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const key = istDateKey(date);
+  if (key === istDateKey(now)) return "Today";
+  if (key === istDateKey(yesterday)) return "Yesterday";
+  return date.toLocaleDateString("en-IN", { timeZone: DISPLAY_TIMEZONE, day: "numeric", month: "short", year: "numeric" });
 }
 
 function formatTimeLabel(date) {
-  return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString("en-IN", { timeZone: DISPLAY_TIMEZONE, hour: "2-digit", minute: "2-digit", hour12: true });
 }
 
 function appendDateSeparatorIfNeeded(date) {
