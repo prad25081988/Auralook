@@ -38,7 +38,7 @@
   </div>
 
   <script>
-    localStorage.setItem("auralook_last_active", String(Date.now()));
+    sessionStorage.setItem("auralook_ctx_active", "true");
 
     (function () {
       var justLocked = {{ 'true' if locked else 'false' }};

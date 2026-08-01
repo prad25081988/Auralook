@@ -9,29 +9,27 @@ currently logged into the app themselves — there's no public "who's
 online" list, by design.
 
 Also includes: Google login, a shared PIN gate (with a 3-strike device
-lockout), a 3-minute inactivity auto-logout, and best-effort detection of
-a full app quit vs. just minimizing.
+lockout), a 2-minute inactivity PIN-only re-lock (Google session itself
+stays alive much longer), and best-effort detection of a full app quit vs.
+just minimizing.
 """
 
 import os
 import uuid
 from datetime import timedelta
-import time
-from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify, make_response
+from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
 
 import db
 
 app = Flask(__name__)
-app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # always serve fresh static files — avoids
-# phones/browsers running an old cached chat.js after a deploy, which can
-# look exactly like a logic bug when it's actually just a stale cache
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
-app.permanent_session_lifetime = timedelta(days=7)  # keeps Google sign-in alive long-term;
-# the 2-minute PIN re-entry is enforced separately, client-side + via /lock,
-# NOT by this cookie expiring — otherwise the two race each other and you'd
-# get bounced all the way back to Google sign-in instead of just the PIN.
+
+# Keeps your Google sign-in alive for a long time — the 2-minute PIN
+# re-entry is a SEPARATE, shorter-lived thing enforced via the client-side
+# timer + /lock route below, not by this cookie expiring.
+app.permanent_session_lifetime = timedelta(days=7)
 
 socketio = SocketIO(
     app,
@@ -42,17 +40,13 @@ socketio = SocketIO(
 
 ACCESS_PIN = os.environ.get("ACCESS_PIN")
 if not ACCESS_PIN:
-    # No fallback to a known/shared value on purpose — if ACCESS_PIN isn't
-    # set in the environment, generate a random one at startup instead.
-    # Nobody (including you) will know it without setting ACCESS_PIN
-    # explicitly, which fails safe rather than silently using an old PIN
-    # that may have been shared or exposed elsewhere.
     ACCESS_PIN = uuid.uuid4().hex[:8]
     print(
         "[startup] WARNING: ACCESS_PIN is not set. Generated a random one "
         "for this run only — set ACCESS_PIN in your environment variables "
         "so the PIN is something you actually know."
     )
+
 SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true"
 
 oauth = OAuth(app)
@@ -69,30 +63,7 @@ try:
 except Exception as e:
     print(f"[startup] Database not ready yet: {e}")
 
-# ---------------------------------------------------------------------------
-# Presence — ONLY used to show an online/offline dot next to contacts you've
-# already added. Never exposes who else is using the app.
-# ---------------------------------------------------------------------------
 email_to_sid = {}  # email -> sid
-
-IDLE_LOCK_SECONDS = 120  # 2 minutes - matches the desired idle timeout
-
-
-@app.before_request
-def enforce_idle_lock():
-    """Runs on every single real request the browser makes, server-side —
-    completely immune to bfcache, localStorage quirks, or anything else
-    client-side, since cookies are always sent fresh with every actual
-    HTTP request regardless of any browser caching behavior. This is what
-    correctly catches 'app was quit and reopened after 2+ minutes', no
-    matter what the browser/OS did with the page in between.
-    """
-    if session.get("user") and session.get("pin_verified"):
-        last_seen = session.get("last_seen")
-        now_ts = time.time()
-        if last_seen is not None and (now_ts - last_seen) > IDLE_LOCK_SECONDS:
-            session["pin_verified"] = False
-        session["last_seen"] = now_ts
 
 
 def _require_login():
@@ -102,9 +73,6 @@ def _require_login():
     return user
 
 
-# ---------------------------------------------------------------------------
-# Auth routes
-# ---------------------------------------------------------------------------
 @app.route("/sw.js")
 def service_worker():
     response = send_from_directory(app.static_folder, "sw.js")
@@ -121,13 +89,7 @@ def index():
         return redirect(url_for("enter_pin"))
     session.permanent = True
     my_name = "Guest"  # topbar always shows "Guest" regardless of the real Google account name
-    response = make_response(render_template("lobby.html", my_name=my_name, my_email=user["email"]))
-    # Critical: without this, Chrome/Safari can silently restore this page
-    # from "back/forward cache" instead of truly reloading it — which
-    # skips our inline lock-check script entirely, since bfcache resumes a
-    # frozen page rather than re-running any load-time scripts.
-    response.headers["Cache-Control"] = "no-store"
-    return response
+    return render_template("lobby.html", my_name=my_name, my_email=user["email"])
 
 
 @app.route("/skip-login")
@@ -245,20 +207,6 @@ def api_remove_contact():
     return jsonify({"ok": True})
 
 
-@app.route("/api/session-check")
-def api_session_check():
-    """Lightweight endpoint the client calls whenever the app becomes
-    visible again (foregrounded) — this doesn't rely on a fresh page load
-    happening at all, which matters because some Android/PWA setups just
-    resume an already-loaded page from memory without making any new
-    network request. This forces an explicit check against the server's
-    authoritative, already-tracked idle timer (see enforce_idle_lock
-    above) regardless of what the browser did with the page in between.
-    """
-    locked = not (session.get("user") and session.get("pin_verified"))
-    return jsonify({"locked": locked})
-
-
 @app.route("/api/contacts/list")
 def api_list_contacts():
     user = _require_login()
@@ -297,8 +245,6 @@ def api_get_conversation(other_email):
     except Exception as e:
         return jsonify({"error": f"Could not load conversation: {e}"}), 500
 
-    # Tell the original sender live (if they're online) that these
-    # messages were just seen, so their tick can flip to blue immediately.
     if newly_seen_ids:
         sender_sid = email_to_sid.get(other_email.lower())
         if sender_sid:
@@ -368,10 +314,7 @@ def api_delete_for_everyone():
 
 
 # ---------------------------------------------------------------------------
-# Socket.IO — presence only. Only tells YOUR browser about online/offline
-# status for emails already in YOUR contacts list (enforced client-side by
-# simply never rendering anyone else). No public discovery, no ephemeral
-# chat system — contacts are the only way to message anyone.
+# Socket.IO — presence only.
 # ---------------------------------------------------------------------------
 @socketio.on("connect")
 def on_connect():
@@ -394,9 +337,6 @@ def on_disconnect():
 
 @socketio.on("mark_seen")
 def on_mark_seen(data):
-    """Client calls this when a message arrives live while that exact chat
-    is already open, so it gets marked seen immediately rather than
-    waiting for the next time the conversation is opened."""
     user = session.get("user")
     if not user or not session.get("pin_verified"):
         return
