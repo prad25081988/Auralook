@@ -24,6 +24,7 @@ from authlib.integrations.flask_client import OAuth
 import db
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 36 * 1024 * 1024  # headroom for 25MB images after base64 + encryption overhead
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
 # Keeps your Google sign-in alive for a long time — the 2-minute PIN
@@ -262,11 +263,13 @@ def api_send_message():
     body = request.json or {}
     to_email = body.get("to_email", "").strip().lower()
     text = body.get("text", "").strip()
+    msg_type = body.get("msgType", "text")
+    mime_type = body.get("mimeType")
     if not to_email or not text:
-        return jsonify({"error": "Missing recipient or message text."}), 400
+        return jsonify({"error": "Missing recipient or message content."}), 400
 
     try:
-        message_id = db.send_message(user["email"], to_email, text)
+        message_id = db.send_message(user["email"], to_email, text, msg_type=msg_type, mime_type=mime_type)
     except Exception as e:
         return jsonify({"error": f"Could not send message: {e}"}), 500
 
@@ -274,7 +277,14 @@ def api_send_message():
     if recipient_sid:
         socketio.emit(
             "contact_message_received",
-            {"id": message_id, "from": user["email"], "text": text, "isMine": False},
+            {
+                "id": message_id,
+                "from": user["email"],
+                "text": text,
+                "isMine": False,
+                "msgType": msg_type,
+                "mimeType": mime_type,
+            },
             room=recipient_sid,
         )
 

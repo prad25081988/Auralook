@@ -22,6 +22,10 @@ const contactMessageForm = document.getElementById("contact-message-form");
 const contactMessageInput = document.getElementById("contact-message-input");
 const contactCloseBtn = document.getElementById("contact-close-btn");
 const contactClearBtn = document.getElementById("contact-clear-btn");
+const imageInput = document.getElementById("image-input");
+const imageBtn = document.getElementById("image-btn");
+
+const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB — comfortably covers any modern phone camera's default photo output
 
 let currentContactEmail = null;
 let currentContactName = null;
@@ -191,6 +195,68 @@ contactMessageForm.onsubmit = async (e) => {
   }
 };
 
+// --- Image sending ---
+imageBtn.onclick = () => {
+  if (!currentContactEmail) {
+    alert("Pick a contact first before sending an image.");
+    return;
+  }
+  imageInput.click();
+};
+
+imageInput.onchange = async () => {
+  const file = imageInput.files[0];
+  imageInput.value = "";
+  if (!file) return;
+
+  if (!file.type.startsWith("image/")) {
+    alert("Please select an image file.");
+    return;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    alert("Image is too large. Please pick something under 25MB.");
+    return;
+  }
+
+  try {
+    const base64Data = await fileToBase64(file);
+    const res = await fetch("/api/message/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        to_email: currentContactEmail,
+        text: base64Data,
+        msgType: "image",
+        mimeType: file.type,
+      }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert(data.error);
+      return;
+    }
+    appendContactMessage({
+      id: data.id,
+      from: myEmail,
+      isMine: true,
+      text: base64Data,
+      msgType: "image",
+      mimeType: file.type,
+    });
+  } catch (err) {
+    alert("Could not send that image. Please try again.");
+  }
+};
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]); // strip the "data:...;base64," prefix
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const DISPLAY_TIMEZONE = "Asia/Kolkata"; // always show India time, regardless of device settings
 
 // Formats a date as YYYY-MM-DD *in IST specifically*, used only to compare
@@ -224,6 +290,36 @@ function appendDateSeparatorIfNeeded(date) {
   contactMessagesEl.appendChild(sep);
 }
 
+const URL_REGEX = /(https?:\/\/[^\s]+)/g;
+
+// Safely builds message content with clickable links, without using
+// innerHTML (avoids any XSS risk from message text). Tapping a link like
+// an Instagram or Facebook URL will open it in the browser, and Android
+// will automatically offer to open it in that app instead if installed —
+// that's standard OS behavior once it's a real link, no special code
+// needed for that part.
+function appendLinkifiedText(container, text) {
+  let lastIndex = 0;
+  let match;
+  URL_REGEX.lastIndex = 0;
+  while ((match = URL_REGEX.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      container.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+    }
+    const a = document.createElement("a");
+    a.href = match[0];
+    a.textContent = match[0];
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "msg-link";
+    container.appendChild(a);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    container.appendChild(document.createTextNode(text.slice(lastIndex)));
+  }
+}
+
 function appendContactMessage(m) {
   const msgDate = m.createdAt ? new Date(m.createdAt) : new Date();
   appendDateSeparatorIfNeeded(msgDate);
@@ -231,7 +327,31 @@ function appendContactMessage(m) {
   const div = document.createElement("div");
   div.className = `message ${m.isMine ? "mine" : "theirs"}`;
   div.dataset.messageId = m.id;
-  div.textContent = `${m.isMine ? "You" : currentContactName || m.from}: ${m.text}`;
+
+  const senderLabel = m.isMine ? "You" : currentContactName || m.from;
+
+  if (m.msgType === "image") {
+    const label = document.createElement("div");
+    label.className = "image-label";
+    label.textContent = `${senderLabel}:`;
+    div.appendChild(label);
+
+    const dataUrl = `data:${m.mimeType || "image/jpeg"};base64,${m.text}`;
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.className = "chat-image";
+    div.appendChild(img);
+
+    const downloadLink = document.createElement("a");
+    downloadLink.href = dataUrl;
+    downloadLink.download = `image-${m.id}.${(m.mimeType || "image/jpeg").split("/")[1] || "jpg"}`;
+    downloadLink.textContent = "Download";
+    downloadLink.className = "image-download-link";
+    div.appendChild(downloadLink);
+  } else {
+    div.appendChild(document.createTextNode(`${senderLabel}: `));
+    appendLinkifiedText(div, m.text);
+  }
 
   const timeLabel = document.createElement("span");
   timeLabel.className = "msg-time";

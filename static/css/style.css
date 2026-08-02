@@ -172,6 +172,24 @@ body {
 .seen-tick.unseen { color: rgba(255,255,255,0.65); }
 .seen-tick.seen { color: #ffffff; font-weight: bold; }
 
+.msg-link { color: inherit; text-decoration: underline; word-break: break-all; }
+.message.theirs .msg-link { color: #4285F4; }
+
+.image-label { font-size: 11px; opacity: 0.75; margin-bottom: 4px; }
+.chat-image { max-width: 100%; max-height: 260px; border-radius: 8px; display: block; object-fit: contain; margin-bottom: 4px; }
+.image-download-link {
+  display: inline-block;
+  font-size: 11px;
+  text-decoration: none;
+  background: rgba(255,255,255,0.25);
+  color: inherit;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.message.theirs .image-download-link { background: rgba(0,0,0,0.06); color: #4285F4; }
+
+#image-btn { background: #f0f0f0; color: #333; padding: 10px 12px; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; }
+
 #contact-message-form { display: flex; padding: 12px; background: white; border-top: 1px solid #e0e0e0; gap: 8px; flex-shrink: 0; }
 #contact-message-input { flex: 1; padding: 10px; border-radius: 6px; border: 1px solid #ccc; font-size: 14px; min-width: 0; }
 #contact-message-form button { padding: 10px 16px; border: none; background: #4285F4; color: white; border-radius: 6px; cursor: pointer; }

@@ -75,10 +75,14 @@ def init_db():
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     deleted_for_sender BOOLEAN DEFAULT FALSE,
                     deleted_for_recipient BOOLEAN DEFAULT FALSE,
-                    seen BOOLEAN DEFAULT FALSE
+                    seen BOOLEAN DEFAULT FALSE,
+                    msg_type TEXT DEFAULT 'text',
+                    mime_type TEXT
                 );
             """)
             cur.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS seen BOOLEAN DEFAULT FALSE;")
+            cur.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS msg_type TEXT DEFAULT 'text';")
+            cur.execute("ALTER TABLE messages ADD COLUMN IF NOT EXISTS mime_type TEXT;")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_conv_key ON messages(conversation_key);")
         conn.commit()
     finally:
@@ -205,7 +209,9 @@ def remove_contact(owner_email, contact_email):
 # ---------------------------------------------------------------------------
 # Messages
 # ---------------------------------------------------------------------------
-def send_message(sender_email, recipient_email, text):
+def send_message(sender_email, recipient_email, text, msg_type="text", mime_type=None):
+    """'text' holds the message body for text messages, or the base64
+    image data for images — both are encrypted the same way before storage."""
     conv_key = _conversation_key(sender_email, recipient_email)
     ciphertext = _encrypt(text)
     conn = _get_conn()
@@ -213,10 +219,10 @@ def send_message(sender_email, recipient_email, text):
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO messages (conversation_key, sender_email, recipient_email, ciphertext)
-                VALUES (%s, %s, %s, %s) RETURNING id, created_at;
+                INSERT INTO messages (conversation_key, sender_email, recipient_email, ciphertext, msg_type, mime_type)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, created_at;
                 """,
-                (conv_key, sender_email.lower(), recipient_email.lower(), ciphertext),
+                (conv_key, sender_email.lower(), recipient_email.lower(), ciphertext, msg_type, mime_type),
             )
             new_row = cur.fetchone()
 
@@ -243,7 +249,8 @@ def send_message(sender_email, recipient_email, text):
 def get_conversation(viewer_email, other_email):
     """Last up-to-3 messages between two people, decrypted, with deleted-for-me
     entries filtered out for the person viewing them. Includes 'seen' status
-    for each message so the sender's side can show a read tick."""
+    for each message so the sender's side can show a read tick, plus
+    msg_type/mime_type so images render correctly."""
     conv_key = _conversation_key(viewer_email, other_email)
     conn = _get_conn()
     try:
@@ -251,7 +258,7 @@ def get_conversation(viewer_email, other_email):
             cur.execute(
                 """
                 SELECT id, sender_email, recipient_email, ciphertext, created_at,
-                       deleted_for_sender, deleted_for_recipient, seen
+                       deleted_for_sender, deleted_for_recipient, seen, msg_type, mime_type
                 FROM messages
                 WHERE conversation_key = %s
                 ORDER BY created_at ASC
@@ -276,6 +283,8 @@ def get_conversation(viewer_email, other_email):
                 "text": _decrypt(row["ciphertext"]),
                 "createdAt": row["created_at"].isoformat(),
                 "seen": row["seen"],
+                "msgType": row["msg_type"] or "text",
+                "mimeType": row["mime_type"],
             })
         return result
     finally:
