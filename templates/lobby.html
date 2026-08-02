@@ -66,6 +66,12 @@
     </div>
   </div>
 
+  <!-- Full-size image viewer — just for viewing, no save/download triggered -->
+  <div id="image-lightbox" class="lightbox hidden">
+    <button id="lightbox-close-btn" class="lightbox-close">✕</button>
+    <img id="lightbox-img" src="" alt="" />
+  </div>
+
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
   <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
   <script>

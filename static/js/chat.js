@@ -24,6 +24,25 @@ const contactCloseBtn = document.getElementById("contact-close-btn");
 const contactClearBtn = document.getElementById("contact-clear-btn");
 const imageInput = document.getElementById("image-input");
 const imageBtn = document.getElementById("image-btn");
+const lightboxEl = document.getElementById("image-lightbox");
+const lightboxImgEl = document.getElementById("lightbox-img");
+const lightboxCloseBtn = document.getElementById("lightbox-close-btn");
+
+// Just for viewing full-size — no download/save is triggered by this.
+function openImageLightbox(dataUrl) {
+  lightboxImgEl.src = dataUrl;
+  lightboxEl.classList.remove("hidden");
+}
+
+function closeImageLightbox() {
+  lightboxEl.classList.add("hidden");
+  lightboxImgEl.src = "";
+}
+
+lightboxCloseBtn.onclick = closeImageLightbox;
+lightboxEl.onclick = (e) => {
+  if (e.target === lightboxEl) closeImageLightbox(); // clicking the dark backdrop also closes it
+};
 
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB — comfortably covers any modern phone camera's default photo output
 
@@ -340,6 +359,8 @@ function appendContactMessage(m) {
     const img = document.createElement("img");
     img.src = dataUrl;
     img.className = "chat-image";
+    img.style.cursor = "zoom-in";
+    img.onclick = () => openImageLightbox(dataUrl);
     div.appendChild(img);
 
     const downloadLink = document.createElement("a");
