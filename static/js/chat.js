@@ -429,6 +429,7 @@ socket.on("contact_message_received", (m) => {
   if (currentContactEmail && m.from.toLowerCase() === currentContactEmail.toLowerCase()) {
     appendContactMessage(m);
     socket.emit("mark_seen", { other_email: currentContactEmail });
+    clearPushNotifications(); // already looking at this exact chat — clear any tray notification right away
   }
 });
 
