@@ -383,15 +383,10 @@ def api_send_message():
             },
             room=recipient_sid,
         )
-    # Always ALSO send a push notification, regardless of whether they have
-    # a live connection right now. A live socket connection just means the
-    # app is open somewhere — it does NOT mean that exact conversation is
-    # visible on screen (e.g. app minimized in the background). Relying on
-    # connection state alone meant messages could arrive silently with no
-    # visible notification at all whenever the app wasn't in the
-    # foreground. Push is harmless to send even when actively chatting —
-    # worst case, one redundant notification; best case, this gap closes.
-    send_disguised_push(to_email)
+    else:
+        # Recipient isn't connected right now — let them know via a
+        # deliberately generic-looking push notification instead.
+        send_disguised_push(to_email)
 
     return jsonify({"ok": True, "id": message_id})
 
