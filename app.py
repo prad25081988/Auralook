@@ -39,6 +39,12 @@ socketio = SocketIO(
     cors_allowed_origins="*",
     async_mode="threading",
     max_http_buffer_size=22 * 1024 * 1024,
+    ping_interval=10,  # how often the client pings the server
+    ping_timeout=15,   # how long the server waits for a response before
+                        # declaring someone disconnected — default is much
+                        # longer (~85s combined), which delayed push
+                        # notifications from firing promptly after someone
+                        # actually closes the app
 )
 
 ACCESS_PIN = os.environ.get("ACCESS_PIN")
