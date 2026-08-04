@@ -57,31 +57,41 @@ SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true
 # notification is always deliberately generic/disguised (looks like a
 # shopping app alert, not a chat app) — see send_disguised_push below.
 # ---------------------------------------------------------------------------
-VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
+import base64 as _base64
+
+# The private key is stored as base64-encoded text (VAPID_PRIVATE_KEY_B64)
+# rather than raw multi-line PEM, because multi-line values pasted into
+# web form fields (like Render's Environment tab) can silently get their
+# line breaks corrupted — base64 has no line breaks to lose, so it can't
+# get mangled in transit. We decode it back to the real PEM here.
+_vapid_private_key_b64 = os.environ.get("VAPID_PRIVATE_KEY_B64")
+VAPID_PRIVATE_KEY = _base64.b64decode(_vapid_private_key_b64).decode() if _vapid_private_key_b64 else None
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
 
 
 def send_disguised_push(recipient_email):
     """Sends a push notification that reveals nothing about this being a
-    chat app, or who sent what — just a generic-looking alert, by design.
-    Silently does nothing if push isn't configured or the person never
-    subscribed / their subscription has gone stale."""
+    chat app, or who sent what — just a generic-looking alert, by design."""
     if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        print("[push] Skipped: VAPID keys not configured on the server.")
         return
     try:
         subscription = db.get_push_subscription(recipient_email)
         if not subscription:
+            print(f"[push] Skipped: no push subscription found for {recipient_email}.")
             return
+        print(f"[push] Attempting to send push to {recipient_email}...")
         webpush(
             subscription_info=subscription,
             data=json.dumps({"title": "Myntra", "body": "New arrivals just for you. Shop now."}),
             vapid_private_key=VAPID_PRIVATE_KEY,
             vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
         )
+        print(f"[push] Successfully sent to {recipient_email}.")
     except WebPushException as e:
         # Subscription likely expired/invalid — clean it up so we stop trying.
-        print(f"[push] Could not deliver, removing stale subscription: {e}")
+        print(f"[push] WebPushException — could not deliver, removing stale subscription: {e}")
         try:
             db.remove_push_subscription(recipient_email)
         except Exception:
@@ -224,7 +234,9 @@ def api_push_subscribe():
         return jsonify({"error": "Invalid subscription."}), 400
     try:
         db.save_push_subscription(user["email"], subscription)
+        print(f"[push] Subscription saved for {user['email']}.")
     except Exception as e:
+        print(f"[push] Failed to save subscription for {user['email']}: {e}")
         return jsonify({"error": f"Could not save subscription: {e}"}), 500
     return jsonify({"ok": True})
 
