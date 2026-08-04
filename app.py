@@ -65,7 +65,24 @@ import base64 as _base64
 # line breaks corrupted — base64 has no line breaks to lose, so it can't
 # get mangled in transit. We decode it back to the real PEM here.
 _vapid_private_key_b64 = os.environ.get("VAPID_PRIVATE_KEY_B64")
-VAPID_PRIVATE_KEY = _base64.b64decode(_vapid_private_key_b64).decode() if _vapid_private_key_b64 else None
+VAPID_PRIVATE_KEY = None
+if _vapid_private_key_b64:
+    try:
+        VAPID_PRIVATE_KEY = _base64.b64decode(_vapid_private_key_b64).decode()
+    except Exception as e:
+        print(f"[push] ERROR: Could not base64-decode VAPID_PRIVATE_KEY_B64: {e}")
+
+# Diagnostic only — prints a SAFE preview (never the actual secret) so we
+# can confirm at startup whether VAPID_PRIVATE_KEY_B64 is even being read,
+# and whether decoding it produces something that looks like a real PEM.
+if _vapid_private_key_b64:
+    print(f"[push] VAPID_PRIVATE_KEY_B64 found, length={len(_vapid_private_key_b64)}")
+    if VAPID_PRIVATE_KEY:
+        preview = VAPID_PRIVATE_KEY[:30].replace("\n", "\\n")
+        print(f"[push] Decoded key starts with: {preview}...")
+        print(f"[push] Decoded key length: {len(VAPID_PRIVATE_KEY)}")
+else:
+    print("[push] WARNING: VAPID_PRIVATE_KEY_B64 environment variable is NOT set.")
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
 
