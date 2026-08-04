@@ -547,3 +547,17 @@ async function setupPushNotifications() {
 }
 
 setupPushNotifications();
+
+// Tell the service worker to dismiss any lingering notifications whenever
+// you actually open or return to the app — matches "once I see it by
+// checking the app, the notification should disappear."
+function clearPushNotifications() {
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.controller.postMessage({ type: "CLOSE_NOTIFICATIONS" });
+  }
+}
+
+clearPushNotifications(); // on initial load
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") clearPushNotifications();
+});

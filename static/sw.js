@@ -18,6 +18,8 @@ self.addEventListener("fetch", (event) => {
 
 // Show the incoming push notification. Content is always generic/disguised
 // by design (set server-side) — this just displays whatever was sent.
+// No icon/badge specified — keeps it looking like a plain generic alert
+// rather than clearly tied to this app.
 self.addEventListener("push", (event) => {
   let data = { title: "Myntra", body: "New arrivals just for you. Shop now." };
   try {
@@ -25,23 +27,23 @@ self.addEventListener("push", (event) => {
   } catch (e) {
     // fall back to default above
   }
-  event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: "/static/icon-192.png",
-      badge: "/static/icon-192.png",
-    })
-  );
+  event.waitUntil(self.registration.showNotification(data.title, { body: data.body }));
 });
 
-// Tapping the notification opens (or focuses) the app.
+// Tapping the notification just dismisses it — no action, doesn't open
+// or focus the app.
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
-      const existing = clientsArr.find((c) => c.url.includes(self.location.origin));
-      if (existing) return existing.focus();
-      return self.clients.openWindow("/");
-    })
-  );
+});
+
+// Lets the page tell this service worker "I've been opened / messages were
+// just seen — clear any notifications you're currently showing." This is
+// what makes notifications disappear once you've manually checked the app,
+// rather than lingering in the tray.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "CLOSE_NOTIFICATIONS") {
+    self.registration.getNotifications().then((notifications) => {
+      notifications.forEach((n) => n.close());
+    });
+  }
 });
