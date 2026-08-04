@@ -62,35 +62,22 @@ SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true
 # Web Push — notifies someone of a new message while they're offline. The
 # notification is always deliberately generic/disguised (looks like a
 # shopping app alert, not a chat app) — see send_disguised_push below.
+#
+# IMPORTANT: VAPID_PRIVATE_KEY must be the RAW private key value
+# (base64url-encoded, no PEM headers, no newlines) — NOT a full PEM with
+# "-----BEGIN PRIVATE KEY-----" wrapping. pywebpush's key loader only
+# accepts the raw form when given a string; a full PEM string causes a
+# confusing "could not deserialize key data" error instead of a clear one.
+# Generate a correctly-formatted key with generate_vapid.py.
 # ---------------------------------------------------------------------------
-import base64 as _base64
-
-# The private key is stored as base64-encoded text (VAPID_PRIVATE_KEY_B64)
-# rather than raw multi-line PEM, because multi-line values pasted into
-# web form fields (like Render's Environment tab) can silently get their
-# line breaks corrupted — base64 has no line breaks to lose, so it can't
-# get mangled in transit. We decode it back to the real PEM here.
-_vapid_private_key_b64 = os.environ.get("VAPID_PRIVATE_KEY_B64")
-VAPID_PRIVATE_KEY = None
-if _vapid_private_key_b64:
-    try:
-        VAPID_PRIVATE_KEY = _base64.b64decode(_vapid_private_key_b64).decode()
-    except Exception as e:
-        print(f"[push] ERROR: Could not base64-decode VAPID_PRIVATE_KEY_B64: {e}")
-
-# Diagnostic only — prints a SAFE preview (never the actual secret) so we
-# can confirm at startup whether VAPID_PRIVATE_KEY_B64 is even being read,
-# and whether decoding it produces something that looks like a real PEM.
-if _vapid_private_key_b64:
-    print(f"[push] VAPID_PRIVATE_KEY_B64 found, length={len(_vapid_private_key_b64)}")
-    if VAPID_PRIVATE_KEY:
-        preview = VAPID_PRIVATE_KEY[:30].replace("\n", "\\n")
-        print(f"[push] Decoded key starts with: {preview}...")
-        print(f"[push] Decoded key length: {len(VAPID_PRIVATE_KEY)}")
-else:
-    print("[push] WARNING: VAPID_PRIVATE_KEY_B64 environment variable is NOT set.")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
+
+if VAPID_PRIVATE_KEY:
+    print(f"[push] VAPID_PRIVATE_KEY found, length={len(VAPID_PRIVATE_KEY)}")
+else:
+    print("[push] WARNING: VAPID_PRIVATE_KEY environment variable is NOT set.")
 
 
 def send_disguised_push(recipient_email):
