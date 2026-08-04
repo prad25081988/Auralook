@@ -19,6 +19,7 @@ Design notes (per agreed plan):
 """
 
 import os
+import json
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from cryptography.fernet import Fernet
@@ -62,6 +63,13 @@ def init_db():
                 CREATE TABLE IF NOT EXISTS users (
                     email TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
+                    updated_at TIMESTAMP DEFAULT NOW()
+                );
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS push_subscriptions (
+                    email TEXT PRIMARY KEY,
+                    subscription_json TEXT NOT NULL,
                     updated_at TIMESTAMP DEFAULT NOW()
                 );
             """)
@@ -188,6 +196,50 @@ def upsert_user_name(email, display_name):
                 """,
                 (email.lower(), display_name),
             )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Push notification subscriptions — used to notify someone of a new message
+# while they're offline. Payload sent is always generic/disguised (handled
+# at the call site in app.py), never the actual sender or message content.
+# ---------------------------------------------------------------------------
+
+
+def save_push_subscription(email, subscription_dict):
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO push_subscriptions (email, subscription_json) VALUES (%s, %s)
+                ON CONFLICT (email) DO UPDATE SET subscription_json = EXCLUDED.subscription_json, updated_at = NOW();
+                """,
+                (email.lower(), json.dumps(subscription_dict)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_push_subscription(email):
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT subscription_json FROM push_subscriptions WHERE email = %s;", (email.lower(),))
+            row = cur.fetchone()
+            return json.loads(row["subscription_json"]) if row else None
+    finally:
+        conn.close()
+
+
+def remove_push_subscription(email):
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM push_subscriptions WHERE email = %s;", (email.lower(),))
         conn.commit()
     finally:
         conn.close()

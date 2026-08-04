@@ -15,3 +15,33 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   event.respondWith(fetch(event.request));
 });
+
+// Show the incoming push notification. Content is always generic/disguised
+// by design (set server-side) — this just displays whatever was sent.
+self.addEventListener("push", (event) => {
+  let data = { title: "Myntra", body: "New arrivals just for you. Shop now." };
+  try {
+    if (event.data) data = event.data.json();
+  } catch (e) {
+    // fall back to default above
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/static/icon-192.png",
+      badge: "/static/icon-192.png",
+    })
+  );
+});
+
+// Tapping the notification opens (or focuses) the app.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
+      const existing = clientsArr.find((c) => c.url.includes(self.location.origin));
+      if (existing) return existing.focus();
+      return self.clients.openWindow("/");
+    })
+  );
+});

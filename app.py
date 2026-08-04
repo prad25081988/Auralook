@@ -15,8 +15,10 @@ just minimizing.
 """
 
 import os
+import json
 import uuid
 from datetime import timedelta
+from pywebpush import webpush, WebPushException
 from flask import Flask, redirect, url_for, session, render_template, request, send_from_directory, jsonify
 from flask_socketio import SocketIO, emit
 from authlib.integrations.flask_client import OAuth
@@ -24,7 +26,7 @@ from authlib.integrations.flask_client import OAuth
 import db
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 36 * 1024 * 1024  # headroom for 25MB images after base64 + encryption overhead
+app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024  # headroom for 10MB images after base64 + encryption overhead
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
 # Keeps your Google sign-in alive for a long time — the 2-minute PIN
@@ -49,6 +51,43 @@ if not ACCESS_PIN:
     )
 
 SKIP_GOOGLE_LOGIN = os.environ.get("SKIP_GOOGLE_LOGIN", "true").lower() == "true"
+
+# ---------------------------------------------------------------------------
+# Web Push — notifies someone of a new message while they're offline. The
+# notification is always deliberately generic/disguised (looks like a
+# shopping app alert, not a chat app) — see send_disguised_push below.
+# ---------------------------------------------------------------------------
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
+VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "mailto:admin@example.com")
+
+
+def send_disguised_push(recipient_email):
+    """Sends a push notification that reveals nothing about this being a
+    chat app, or who sent what — just a generic-looking alert, by design.
+    Silently does nothing if push isn't configured or the person never
+    subscribed / their subscription has gone stale."""
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        return
+    try:
+        subscription = db.get_push_subscription(recipient_email)
+        if not subscription:
+            return
+        webpush(
+            subscription_info=subscription,
+            data=json.dumps({"title": "Myntra", "body": "New arrivals just for you. Shop now."}),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
+        )
+    except WebPushException as e:
+        # Subscription likely expired/invalid — clean it up so we stop trying.
+        print(f"[push] Could not deliver, removing stale subscription: {e}")
+        try:
+            db.remove_push_subscription(recipient_email)
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[push] Unexpected error sending push: {e}")
 
 oauth = OAuth(app)
 google = oauth.register(
@@ -170,6 +209,38 @@ def lock():
 # ---------------------------------------------------------------------------
 # Contacts + messaging (REST API, backed by Postgres) — the only chat system
 # ---------------------------------------------------------------------------
+@app.route("/api/push/vapid-public-key")
+def api_vapid_public_key():
+    return jsonify({"key": VAPID_PUBLIC_KEY or ""})
+
+
+@app.route("/api/push/subscribe", methods=["POST"])
+def api_push_subscribe():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    subscription = request.json or {}
+    if not subscription.get("endpoint"):
+        return jsonify({"error": "Invalid subscription."}), 400
+    try:
+        db.save_push_subscription(user["email"], subscription)
+    except Exception as e:
+        return jsonify({"error": f"Could not save subscription: {e}"}), 500
+    return jsonify({"ok": True})
+
+
+@app.route("/api/push/unsubscribe", methods=["POST"])
+def api_push_unsubscribe():
+    user = _require_login()
+    if not user:
+        return jsonify({"error": "Not logged in"}), 401
+    try:
+        db.remove_push_subscription(user["email"])
+    except Exception as e:
+        return jsonify({"error": f"Could not remove subscription: {e}"}), 500
+    return jsonify({"ok": True})
+
+
 @app.route("/api/contacts/add", methods=["POST"])
 def api_add_contact():
     user = _require_login()
@@ -287,6 +358,10 @@ def api_send_message():
             },
             room=recipient_sid,
         )
+    else:
+        # Recipient isn't connected right now — let them know via a
+        # deliberately generic-looking push notification instead.
+        send_disguised_push(to_email)
 
     return jsonify({"ok": True, "id": message_id})
 

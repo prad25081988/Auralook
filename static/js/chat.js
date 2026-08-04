@@ -44,7 +44,7 @@ lightboxEl.onclick = (e) => {
   if (e.target === lightboxEl) closeImageLightbox(); // clicking the dark backdrop also closes it
 };
 
-const MAX_IMAGE_BYTES = 25 * 1024 * 1024; // 25MB — comfortably covers any modern phone camera's default photo output
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB — balances image quality with loading/decryption speed
 
 let currentContactEmail = null;
 let currentContactName = null;
@@ -233,7 +233,7 @@ imageInput.onchange = async () => {
     return;
   }
   if (file.size > MAX_IMAGE_BYTES) {
-    alert("Image is too large. Please pick something under 25MB.");
+    alert("Image is too large. Please pick something under 10MB.");
     return;
   }
 
@@ -502,3 +502,48 @@ document.addEventListener("visibilitychange", () => {
 // Note: quit-detection (full app close vs. minimize) runs as an inline
 // script in lobby.html's <head>, so it executes instantly before any page
 // content renders — see there for the actual check.
+
+// ===========================================================================
+// PUSH NOTIFICATIONS — lets you know about a new message while offline.
+// The notification itself is deliberately generic (looks like a shopping
+// alert, not a chat app) — that's controlled entirely server-side; this
+// code just handles asking permission and registering the subscription.
+// ===========================================================================
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+async function setupPushNotifications() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+
+  try {
+    const keyRes = await fetch("/api/push/vapid-public-key");
+    const { key } = await keyRes.json();
+    if (!key) return; // push not configured server-side yet
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") return;
+
+    const registration = await navigator.serviceWorker.ready;
+    let subscription = await registration.pushManager.getSubscription();
+    if (!subscription) {
+      subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+    }
+
+    await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(subscription),
+    });
+  } catch (e) {
+    console.error("Push notification setup failed:", e);
+  }
+}
+
+setupPushNotifications();
