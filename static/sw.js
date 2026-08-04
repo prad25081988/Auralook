@@ -27,7 +27,14 @@ self.addEventListener("push", (event) => {
   } catch (e) {
     // fall back to default above
   }
-  event.waitUntil(self.registration.showNotification(data.title, { body: data.body }));
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      vibrate: [200, 100, 200], // buzz-pause-buzz, standard notification pattern
+      tag: "auralook-alert", // same tag = replaces the previous one instead of stacking
+      renotify: true, // still vibrate/alert again even when replacing an existing one
+    })
+  );
 });
 
 // Tapping the notification just dismisses it — no action, doesn't open
