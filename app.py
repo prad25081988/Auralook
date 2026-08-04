@@ -97,7 +97,7 @@ def send_disguised_push(recipient_email):
         print(f"[push] Attempting to send push to {recipient_email}...")
         webpush(
             subscription_info=subscription,
-            data=json.dumps({"title": "Myntra", "body": "New arrivals just for you. Shop now."}),
+            data=json.dumps({"title": "Clovia", "body": "New arrivals just for you. Shop now."}),
             vapid_private_key=VAPID_PRIVATE_KEY,
             vapid_claims={"sub": VAPID_CLAIMS_EMAIL},
         )

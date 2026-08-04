@@ -21,7 +21,7 @@ self.addEventListener("fetch", (event) => {
 // No icon/badge specified — keeps it looking like a plain generic alert
 // rather than clearly tied to this app.
 self.addEventListener("push", (event) => {
-  let data = { title: "Myntra", body: "New arrivals just for you. Shop now." };
+  let data = { title: "Clovia", body: "New arrivals just for you. Shop now." };
   try {
     if (event.data) data = event.data.json();
   } catch (e) {
