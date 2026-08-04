@@ -26,6 +26,9 @@ from authlib.integrations.flask_client import OAuth
 import db
 
 app = Flask(__name__)
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # always serve fresh static files (especially
+# important for sw.js — stale caching here means phones keep running an
+# old service worker even after you've deployed a new one)
 app.config["MAX_CONTENT_LENGTH"] = 15 * 1024 * 1024  # headroom for 10MB images after base64 + encryption overhead
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
